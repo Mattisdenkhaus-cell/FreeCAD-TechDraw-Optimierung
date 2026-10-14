@@ -19,7 +19,7 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force C:/FC | Out-Null
-          git clone -c core.autocrlf=false --depth 1 --branch 1.1.4 --recurse-submodules --shallow-submodules https://github.com/FreeCAD/FreeCAD.git C:/FC/source
+         git clone -c core.autocrlf=false --depth 1 --branch 1.1.4 --recurse-submodules --shallow-submodules https://github.com/FreeCAD/FreeCAD.git C:/FC/source
           if ($LASTEXITCODE -ne 0) { throw "Downloading FreeCAD source failed." }
           git -C C:/FC/source rev-parse HEAD
 

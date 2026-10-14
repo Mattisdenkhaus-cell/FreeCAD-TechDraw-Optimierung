@@ -1,0 +1,90 @@
+name: FreeCAD 1.1.4 – TechDraw Test-Build
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows:
+    name: Build FreeCAD 1.1.4 on Windows
+    runs-on: windows-2022
+    timeout-minutes: 330
+    steps:
+      - name: Checkout test files
+        uses: actions/checkout@v4
+
+      - name: Get official FreeCAD 1.1.4 sources
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force C:/FC | Out-Null
+          git clone --depth 1 --branch 1.1.4 --recurse-submodules --shallow-submodules https://github.com/FreeCAD/FreeCAD.git C:/FC/source
+          if ($LASTEXITCODE -ne 0) { throw "Downloading FreeCAD source failed." }
+          git -C C:/FC/source rev-parse HEAD
+
+      - name: Validate and apply experimental TechDraw patch
+        shell: pwsh
+        run: |
+          $patch = Join-Path $env:GITHUB_WORKSPACE 'FreeCAD_1.1.4_TechDraw_BatchedSvgHatch_KORRIGIERT.patch'
+          if (!(Test-Path $patch)) { throw "Missing patch: $patch" }
+          git -C C:/FC/source apply --check $patch
+          if ($LASTEXITCODE -ne 0) { throw "Patch does not apply cleanly to 1.1.4." }
+          git -C C:/FC/source apply $patch
+          if ($LASTEXITCODE -ne 0) { throw "Could not apply patch." }
+          git -C C:/FC/source diff --stat
+
+      - name: Download official FreeCAD 1.1 LibPack
+        shell: pwsh
+        run: |
+          $url = 'https://github.com/FreeCAD/FreeCAD-LibPack/releases/download/3.1.1.3/LibPack-1.1.0-v3.1.1.3-Release.7z'
+          New-Item -ItemType Directory -Force C:/FC/libpack-unpack | Out-Null
+          curl.exe -fL --retry 3 --output C:/FC/libpack.7z $url
+          if ($LASTEXITCODE -ne 0) { throw "LibPack download failed." }
+          7z x C:/FC/libpack.7z '-oC:/FC/libpack-unpack' -y
+          if ($LASTEXITCODE -ne 0) { throw "LibPack extraction failed." }
+          $extracted = 'C:/FC/libpack-unpack/LibPack-1.1.0-v3.1.1.3-Release'
+          if (!(Test-Path $extracted)) { throw "Extracted LibPack folder not found." }
+          Move-Item -Path $extracted -Destination C:/FC/libpack
+          Remove-Item C:/FC/libpack.7z -Force
+          Remove-Item C:/FC/libpack-unpack -Recurse -Force
+
+      - name: Configure with Visual Studio 2022
+        shell: pwsh
+        run: |
+          cmake -S C:/FC/source -B C:/FC/build --preset release -A x64 `
+            -DCMAKE_VS_NO_COMPILE_BATCHING=ON `
+            -DFREECAD_USE_PCH=OFF `
+            -DFREECAD_RELEASE_PDB=OFF `
+            -DFREECAD_LIBPACK_DIR=C:/FC/libpack `
+            -DFREECAD_COPY_DEPEND_DIRS_TO_BUILD=ON `
+            -DFREECAD_COPY_LIBPACK_BIN_TO_BUILD=ON `
+            -DFREECAD_COPY_PLUGINS_BIN_TO_BUILD=ON
+          if ($LASTEXITCODE -ne 0) { throw "CMake configure failed." }
+
+      - name: Compile FreeCAD
+        shell: pwsh
+        run: |
+          cmake --build C:/FC/build --config Release --parallel 2
+          if ($LASTEXITCODE -ne 0) { throw "FreeCAD C++ compilation failed." }
+
+      - name: Check and package test-build
+        shell: pwsh
+        run: |
+          $bin = 'C:/FC/build/bin'
+          if (!(Test-Path "$bin/FreeCAD.exe")) { throw "FreeCAD.exe not found." }
+          Push-Location $bin
+          try {
+            7z a -t7z -mx=5 "$env:GITHUB_WORKSPACE/FreeCAD-1.1.4-TechDraw-Windows.7z" '.\*'
+            if ($LASTEXITCODE -ne 0) { throw "Archive creation failed." }
+          } finally {
+            Pop-Location
+          }
+
+      - name: Make build downloadable
+        uses: actions/upload-artifact@v4
+        with:
+          name: FreeCAD-1.1.4-TechDraw-Test-Windows
+          path: FreeCAD-1.1.4-TechDraw-Windows.7z
+          retention-days: 7
+          if-no-files-found: error

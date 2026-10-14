@@ -1,4 +1,4 @@
-name: FreeCAD 1.1.4 - TechDraw Test-Build
+name: FreeCAD 1.1.4 - TechDraw Test-Build V7
 
 on:
   workflow_dispatch:
@@ -32,65 +32,110 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Downloading FreeCAD source failed." }
           git -C C:/FC/source rev-parse HEAD
 
-      - name: Apply TechDraw patch with source verification
+      - name: Apply TechDraw change using verified C++ anchors
         shell: pwsh
         run: |
           $patch = Join-Path $env:GITHUB_WORKSPACE 'FreeCAD_1.1.4_TechDraw_BatchedSvgHatch_KORRIGIERT.patch'
           $source = 'C:/FC/source/src/Mod/TechDraw/Gui/QGIFace.cpp'
-          if (!(Test-Path $patch)) { throw "Patch file is missing: $patch" }
-          if (!(Test-Path $source)) { throw "Original C++ file is missing: $source" }
-          $applyScript = Join-Path $env:RUNNER_TEMP 'apply_freecad_patch.py'
+          if (!(Test-Path $patch)) { throw "Missing C++ patch: $patch" }
+          if (!(Test-Path $source)) { throw "Missing FreeCAD source: $source" }
+          $script = Join-Path $env:RUNNER_TEMP 'apply_verified_hatch.py'
           @'
           import re
           import sys
           from pathlib import Path
 
           source_path, patch_path = map(Path, sys.argv[1:3])
-          original = source_path.read_bytes().decode('utf-8-sig').splitlines()
-          patch = patch_path.read_bytes().decode('utf-8-sig').splitlines()
+          source = source_path.read_bytes().decode('utf-8-sig').replace('\r\n', '\n')
+          patch_lines = patch_path.read_bytes().decode('utf-8-sig').splitlines()
+
+          # Read the six original change blocks. Avoid applying fragile Git line contexts.
           hunks = []
           current = None
-          for line in patch:
-              match = re.match(r'^@@ -(\d+),(\d+) \+(\d+),(\d+) @@', line)
-              if match:
+          for line in patch_lines:
+              if re.match(r'^@@ -\d+,\d+ \+\d+,\d+ @@', line):
                   if current is not None:
                       hunks.append(current)
-                  current = (tuple(map(int, match.groups())), [])
+                  current = []
               elif current is not None and line.startswith((' ', '+', '-')):
-                  current[1].append(line)
+                  current.append(line)
               elif line.startswith('*** End Patch'):
                   break
           if current is not None:
               hunks.append(current)
           if len(hunks) != 6:
-              raise RuntimeError(f'Expected 6 patch hunks, got {len(hunks)}')
+              raise RuntimeError(f'Expected 6 C++ change blocks, got {len(hunks)}')
 
-          changed = original[:]
-          position = 0
-          for number, (counts, lines) in enumerate(hunks, start=1):
-              before = [line[1:] for line in lines if not line.startswith('+')]
-              after = [line[1:] for line in lines if not line.startswith('-')]
-              if len(before) != counts[1] or len(after) != counts[3]:
-                  raise RuntimeError(f'Invalid patch hunk #{number}: line counts disagree')
-              hits = [idx for idx in range(position, len(changed) - len(before) + 1)
-                      if changed[idx:idx + len(before)] == before]
-              if len(hits) != 1:
-                  raise RuntimeError(f'Patch hunk #{number} matched {len(hits)} times; expected exactly once. Original FreeCAD file was not modified.')
-              idx = hits[0]
-              changed[idx:idx + len(before)] = after
-              position = idx + len(after)
-              print(f'Patch hunk {number}/{len(hunks)}: applied at line {idx + 1}')
-          if not any('class BatchedSvgHatchRect final' in line for line in changed):
-              raise RuntimeError('Batched SVG class was not inserted')
-          if not any('void QGIFace::buildSvgHatch()' in line for line in changed):
-              raise RuntimeError('Original hatch function is missing')
-          source_path.write_bytes(('\n'.join(changed) + '\n').encode('utf-8'))
-          print('OK: all 6 hunks applied, original source verified, C++ file saved.')
-          '@ | Set-Content -Path $applyScript -Encoding utf8
-          python $applyScript $source $patch
-          if ($LASTEXITCODE -ne 0) { throw "Patch application failed. Read the preceding precise diagnostic." }
+          def additions(i):
+              return '\n'.join(line[1:] for line in hunks[i] if line.startswith('+')) + '\n'
+
+          def replace_once(text, old, new, label):
+              n = text.count(old)
+              if n != 1:
+                  raise RuntimeError(f'{label}: found {n} matching locations, expected 1. Source NOT modified.')
+              print(f'OK: {label}')
+              return text.replace(old, new, 1)
+
+          if 'BatchedSvgHatchRect' in source:
+              raise RuntimeError('Source already modified; refusing to modify it again.')
+
+          # 1. Qt header
+          source = replace_once(source,
+              '# include <QTransform>\n',
+              additions(0) + '# include <QTransform>\n',
+              'Qt include')
+
+          # 2. Experimental renderer class
+          source = replace_once(source,
+              'using DU = DrawUtil;\n',
+              'using DU = DrawUtil;\n' + additions(1),
+              'BatchedSvgHatchRect class')
+
+          # 3. Use new renderer in QGIFace constructor
+          source = replace_once(source,
+              '    m_svgHatchArea = new QGCustomRect();\n',
+              additions(2),
+              'Qt graphics item constructor')
+
+          # 4-6. Make three targeted edits inside buildSvgHatch only.
+          start_token = 'void QGIFace::buildSvgHatch()'
+          end_token = 'void QGIFace::buildPixHatch()'
+          if source.count(start_token) != 1 or source.count(end_token) != 1:
+              raise RuntimeError('Could not isolate buildSvgHatch exactly once.')
+          start = source.index(start_token)
+          end = source.index(end_token, start)
+          body = source[start:end]
+
+          # Insert before the hatch rectangle setup; surrounding numeric lines
+          # can differ across minor source revisions.
+          targets = re.findall(r'(?m)^    m_svgHatchArea->setRect\([^\n]*\);$', body)
+          if len(targets) != 1:
+              raise RuntimeError(f'Hatch rectangle: found {len(targets)} anchor lines, expected 1.')
+          body = replace_once(body, targets[0] + '\n', additions(3) + targets[0] + '\n',
+              'Reset cached hatch tiles')
+
+          body = replace_once(body,
+              '    long int tileCount = 0;\n',
+              additions(4) + '    long int tileCount = 0;\n',
+              'Batched tile configuration and original-path switch')
+
+          end_marker = '    QPointF faceCenterToMRect = mapToItem(m_svgHatchArea, faceCenter);\n'
+          body = replace_once(body, end_marker, additions(5) + end_marker,
+              'End original-path switch')
+
+          source = source[:start] + body + source[end:]
+          if source.count('class BatchedSvgHatchRect final') != 1:
+              raise RuntimeError('Batched renderer insertion did not validate.')
+          if source.count('#if TECHDRAW_BATCH_SVG_HATCH') < 3:
+              raise RuntimeError('Conditional C++ blocks are missing.')
+          # Write only after ALL checks succeeded.
+          source_path.write_bytes(source.encode('utf-8'))
+          print('SUCCESS: all six C++ changes applied to verified source locations.')
+          '@ | Set-Content -Path $script -Encoding utf8
+          python $script $source $patch
+          if ($LASTEXITCODE -ne 0) { throw "C++ changes could not be applied safely." }
           git -C C:/FC/source diff --check
-          if ($LASTEXITCODE -ne 0) { throw "Patched source has whitespace errors." }
+          if ($LASTEXITCODE -ne 0) { throw "Git whitespace validation failed." }
           git -C C:/FC/source diff --stat
 
       - name: Download official FreeCAD 1.1 LibPack

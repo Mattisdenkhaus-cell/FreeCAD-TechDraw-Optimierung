@@ -1,14 +1,23 @@
-name: FreeCAD 1.1.4 – TechDraw Test-Build
+name: FreeCAD 1.1.4 - TechDraw Test-Build
 
 on:
   workflow_dispatch:
+    inputs:
+      mode:
+        description: "Zuerst Patch-Pruefung auswaehlen"
+        required: true
+        default: patch-only
+        type: choice
+        options:
+          - patch-only
+          - full-build
 
 permissions:
   contents: read
 
 jobs:
   build-windows:
-    name: Build FreeCAD 1.1.4 on Windows
+    name: FreeCAD 1.1.4 - ${{ inputs.mode }}
     runs-on: windows-2022
     timeout-minutes: 330
     steps:
@@ -23,19 +32,69 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Downloading FreeCAD source failed." }
           git -C C:/FC/source rev-parse HEAD
 
-      - name: Validate and apply experimental TechDraw patch
+      - name: Apply TechDraw patch with source verification
         shell: pwsh
         run: |
           $patch = Join-Path $env:GITHUB_WORKSPACE 'FreeCAD_1.1.4_TechDraw_BatchedSvgHatch_KORRIGIERT.patch'
-          if (!(Test-Path $patch)) { throw "Missing patch: $patch" }
-          # Handles differences in whitespace/CRLF without changing FreeCAD source files.
-          git -C C:/FC/source apply --check --ignore-space-change $patch
-          if ($LASTEXITCODE -ne 0) { throw "Patch does not match FreeCAD 1.1.4, even with whitespace tolerance." }
-          git -C C:/FC/source apply --ignore-space-change $patch
-          if ($LASTEXITCODE -ne 0) { throw "Could not apply patch." }
+          $source = 'C:/FC/source/src/Mod/TechDraw/Gui/QGIFace.cpp'
+          if (!(Test-Path $patch)) { throw "Patch file is missing: $patch" }
+          if (!(Test-Path $source)) { throw "Original C++ file is missing: $source" }
+          $applyScript = Join-Path $env:RUNNER_TEMP 'apply_freecad_patch.py'
+          @'
+          import re
+          import sys
+          from pathlib import Path
+
+          source_path, patch_path = map(Path, sys.argv[1:3])
+          original = source_path.read_bytes().decode('utf-8-sig').splitlines()
+          patch = patch_path.read_bytes().decode('utf-8-sig').splitlines()
+          hunks = []
+          current = None
+          for line in patch:
+              match = re.match(r'^@@ -(\d+),(\d+) \+(\d+),(\d+) @@', line)
+              if match:
+                  if current is not None:
+                      hunks.append(current)
+                  current = (tuple(map(int, match.groups())), [])
+              elif current is not None and line.startswith((' ', '+', '-')):
+                  current[1].append(line)
+              elif line.startswith('*** End Patch'):
+                  break
+          if current is not None:
+              hunks.append(current)
+          if len(hunks) != 6:
+              raise RuntimeError(f'Expected 6 patch hunks, got {len(hunks)}')
+
+          changed = original[:]
+          position = 0
+          for number, (counts, lines) in enumerate(hunks, start=1):
+              before = [line[1:] for line in lines if not line.startswith('+')]
+              after = [line[1:] for line in lines if not line.startswith('-')]
+              if len(before) != counts[1] or len(after) != counts[3]:
+                  raise RuntimeError(f'Invalid patch hunk #{number}: line counts disagree')
+              hits = [idx for idx in range(position, len(changed) - len(before) + 1)
+                      if changed[idx:idx + len(before)] == before]
+              if len(hits) != 1:
+                  raise RuntimeError(f'Patch hunk #{number} matched {len(hits)} times; expected exactly once. Original FreeCAD file was not modified.')
+              idx = hits[0]
+              changed[idx:idx + len(before)] = after
+              position = idx + len(after)
+              print(f'Patch hunk {number}/{len(hunks)}: applied at line {idx + 1}')
+          if not any('class BatchedSvgHatchRect final' in line for line in changed):
+              raise RuntimeError('Batched SVG class was not inserted')
+          if not any('void QGIFace::buildSvgHatch()' in line for line in changed):
+              raise RuntimeError('Original hatch function is missing')
+          source_path.write_bytes(('\n'.join(changed) + '\n').encode('utf-8'))
+          print('OK: all 6 hunks applied, original source verified, C++ file saved.')
+          '@ | Set-Content -Path $applyScript -Encoding utf8
+          python $applyScript $source $patch
+          if ($LASTEXITCODE -ne 0) { throw "Patch application failed. Read the preceding precise diagnostic." }
+          git -C C:/FC/source diff --check
+          if ($LASTEXITCODE -ne 0) { throw "Patched source has whitespace errors." }
           git -C C:/FC/source diff --stat
 
       - name: Download official FreeCAD 1.1 LibPack
+        if: ${{ inputs.mode == 'full-build' }}
         shell: pwsh
         run: |
           $url = 'https://github.com/FreeCAD/FreeCAD-LibPack/releases/download/3.1.1.3/LibPack-1.1.0-v3.1.1.3-Release.7z'
@@ -45,12 +104,11 @@ jobs:
           7z x C:/FC/libpack.7z '-oC:/FC/libpack-unpack' -y
           if ($LASTEXITCODE -ne 0) { throw "LibPack extraction failed." }
           $extracted = 'C:/FC/libpack-unpack/LibPack-1.1.0-v3.1.1.3-Release'
-          if (!(Test-Path $extracted)) { throw "Extracted LibPack folder not found." }
+          if (!(Test-Path $extracted)) { throw "Expected LibPack folder not found; inspect archive structure." }
           Move-Item -Path $extracted -Destination C:/FC/libpack
-          Remove-Item C:/FC/libpack.7z -Force
-          Remove-Item C:/FC/libpack-unpack -Recurse -Force
 
       - name: Configure with Visual Studio 2022
+        if: ${{ inputs.mode == 'full-build' }}
         shell: pwsh
         run: |
           cmake -S C:/FC/source -B C:/FC/build --preset release -A x64 `
@@ -64,12 +122,14 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "CMake configure failed." }
 
       - name: Compile FreeCAD
+        if: ${{ inputs.mode == 'full-build' }}
         shell: pwsh
         run: |
           cmake --build C:/FC/build --config Release --parallel 2
-          if ($LASTEXITCODE -ne 0) { throw "FreeCAD C++ compilation failed." }
+          if ($LASTEXITCODE -ne 0) { throw "FreeCAD compilation failed." }
 
-      - name: Check and package test-build
+      - name: Package test build
+        if: ${{ inputs.mode == 'full-build' }}
         shell: pwsh
         run: |
           $bin = 'C:/FC/build/bin'
@@ -82,7 +142,8 @@ jobs:
             Pop-Location
           }
 
-      - name: Make build downloadable
+      - name: Upload test build
+        if: ${{ inputs.mode == 'full-build' }}
         uses: actions/upload-artifact@v4
         with:
           name: FreeCAD-1.1.4-TechDraw-Test-Windows

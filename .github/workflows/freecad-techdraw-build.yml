@@ -1,4 +1,4 @@
-name: FreeCAD 1.1.4 - TechDraw Test-Build V7
+name: FreeCAD 1.1.4 - TechDraw Test-Build V8
 
 on:
   workflow_dispatch:
@@ -173,16 +173,50 @@ jobs:
           cmake --build C:/FC/build --config Release --parallel 2
           if ($LASTEXITCODE -ne 0) { throw "FreeCAD compilation failed." }
 
-      - name: Package test build
+      - name: Install complete FreeCAD test version
         if: ${{ inputs.mode == 'full-build' }}
         shell: pwsh
         run: |
-          $bin = 'C:/FC/build/bin'
-          if (!(Test-Path "$bin/FreeCAD.exe")) { throw "FreeCAD.exe not found." }
-          Push-Location $bin
+          # Build/bin by itself is NOT a complete FreeCAD application.
+          # Use the official CMake install step to collect GUI modules,
+          # Python workbenches, resources and executable in one tree.
+          cmake --install C:/FC/build --config Release --prefix C:/FC/installed
+          if ($LASTEXITCODE -ne 0) { throw "CMake installation failed." }
+
+          $installed = 'C:/FC/installed'
+          $bin = Join-Path $installed 'bin'
+          if (!(Test-Path (Join-Path $bin 'FreeCAD.exe'))) {
+            throw "No FreeCAD.exe found in installed/bin. Inspect install layout."
+          }
+
+          # Copy runtime DLLs, Qt plugins and Python runtime prepared by LibPack.
+          # The build/bin folder contains third-party dependencies needed to run
+          # the installed FreeCAD.exe on machines without Visual Studio.
+          Copy-Item -Path 'C:/FC/build/bin/*' -Destination $bin -Recurse -Force
+
+          if (!(Test-Path (Join-Path $installed 'data'))) {
+            throw "The installation is missing the data resource folder."
+          }
+          $techDrawModules = @(Get-ChildItem -Path $installed -Recurse -File -ErrorAction Stop |
+            Where-Object { $_.Name -match '^TechDrawGui\.(pyd|dll)$' })
+          if ($techDrawModules.Count -eq 0) {
+            throw "TechDrawGui module is absent; refusing to package an unusable build."
+          }
+          Write-Host 'Compiled TechDraw GUI module(s):'
+          $techDrawModules | ForEach-Object { Write-Host $_.FullName }
+          Write-Host 'Installed root folders:'
+          Get-ChildItem $installed -Directory | ForEach-Object { Write-Host $_.Name }
+
+      - name: Package complete standalone test version
+        if: ${{ inputs.mode == 'full-build' }}
+        shell: pwsh
+        run: |
+          $installed = 'C:/FC/installed'
+          $archive = Join-Path $env:GITHUB_WORKSPACE 'FreeCAD-1.1.4-TechDraw-Windows-COMPLETE.7z'
+          Push-Location $installed
           try {
-            7z a -t7z -mx=5 "$env:GITHUB_WORKSPACE/FreeCAD-1.1.4-TechDraw-Windows.7z" '.\*'
-            if ($LASTEXITCODE -ne 0) { throw "Archive creation failed." }
+            7z a -t7z -mx=5 $archive '.\*'
+            if ($LASTEXITCODE -ne 0) { throw "Packaging complete installation failed." }
           } finally {
             Pop-Location
           }
@@ -191,7 +225,7 @@ jobs:
         if: ${{ inputs.mode == 'full-build' }}
         uses: actions/upload-artifact@v4
         with:
-          name: FreeCAD-1.1.4-TechDraw-Test-Windows
-          path: FreeCAD-1.1.4-TechDraw-Windows.7z
+          name: FreeCAD-1.1.4-TechDraw-Test-Windows-COMPLETE
+          path: FreeCAD-1.1.4-TechDraw-Windows-COMPLETE.7z
           retention-days: 7
           if-no-files-found: error

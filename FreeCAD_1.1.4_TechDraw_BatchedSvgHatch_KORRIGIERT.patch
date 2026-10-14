@@ -1,0 +1,167 @@
+diff --git a/src/Mod/TechDraw/Gui/QGIFace.cpp b/src/Mod/TechDraw/Gui/QGIFace.cpp
+--- a/src/Mod/TechDraw/Gui/QGIFace.cpp
++++ b/src/Mod/TechDraw/Gui/QGIFace.cpp
+@@ -26,6 +26,7 @@
+ # include <QPainterPath>
+ # include <QPointF>
+ # include <QRectF>
++# include <QStyleOptionGraphicsItem>
+ # include <QTransform>
+ 
+ #include <App/Application.h>
+@@ -47,7 +48,111 @@
+ using namespace TechDrawGui;
+ using namespace TechDraw;
+ 
+ using DU = DrawUtil;
++
++// Experimental rendering-only A/B switch. Set to 0 for the original tile path.
++#ifndef TECHDRAW_BATCH_SVG_HATCH
++#define TECHDRAW_BATCH_SVG_HATCH 1
++#endif
++
++#if TECHDRAW_BATCH_SVG_HATCH
++namespace {
++
++// One Qt graphics item per hatch area instead of one QGraphicsSvgItem per tile.
++// The item holds a NON-owning reference to its parent QGIFace's QSvgRenderer.
++class BatchedSvgHatchRect final : public QGCustomRect
++{
++public:
++    BatchedSvgHatchRect()
++    {
++        setFlag(QGraphicsItem::ItemUsesExtendedStyleOption, true);
++    }
++
++    void resetTiles()
++    {
++        prepareGeometryChange();
++        m_renderer = nullptr;
++        m_tileCoverage = QRectF();
++        m_columns = 0;
++        m_rows = 0;
++        update();
++    }
++
++    void configureTiles(QSvgRenderer* renderer, int columns, int rows,
++                        qreal stepX, qreal stepY, QPointF offset,
++                        qreal initialY, qreal scale, long maxTiles)
++    {
++        prepareGeometryChange();
++        m_renderer = renderer;
++        m_columns = columns;
++        m_rows = rows;
++        m_stepX = stepX;
++        m_stepY = stepY;
++        m_origin = QPointF(offset.x(), initialY + offset.y());
++        m_limit = maxTiles + 1;  // Original implementation creates limit + 1 tiles.
++
++        const QSize nativeSize = renderer ? renderer->defaultSize() : QSize();
++        m_tileSize = QSizeF(nativeSize.width() * scale,
++                            nativeSize.height() * scale);
++        if (columns > 0 && rows > 0 && m_tileSize.width() > 0 && m_tileSize.height() > 0) {
++            m_tileCoverage = QRectF(m_origin,
++                QSizeF((columns - 1) * stepX + m_tileSize.width(),
++                       (rows - 1) * stepY + m_tileSize.height()));
++        } else {
++            m_tileCoverage = QRectF();
++        }
++        update();
++    }
++
++    QRectF boundingRect() const override
++    {
++        // Unlike child SVG items, painting within one item must advertise
++        // any area extending beyond the original hatch rectangle.
++        return QGCustomRect::boundingRect().united(m_tileCoverage);
++    }
++
++    void paint(QPainter* painter, const QStyleOptionGraphicsItem* option,
++               QWidget* widget = nullptr) override
++    {
++        QGCustomRect::paint(painter, option, widget);
++        if (!m_renderer || !m_renderer->isValid() ||
++            m_tileSize.isEmpty() || m_stepX <= 0 || m_stepY <= 0) {
++            return;
++        }
++
++        // Extended-style option exposes only the region Qt asks us to repaint.
++        const QRectF exposed = (option && option->exposedRect.isValid())
++            ? option->exposedRect : boundingRect();
++        long tileNumber = 0;
++        for (int x = 0; x < m_columns; ++x) {
++            for (int y = 0; y < m_rows; ++y) {
++                if (++tileNumber > m_limit) {
++                    return;
++                }
++                const QRectF tile(QPointF(m_origin.x() + x * m_stepX,
++                                         m_origin.y() + y * m_stepY),
++                                  m_tileSize);
++                if (tile.intersects(exposed)) {
++                    m_renderer->render(painter, tile);
++                }
++            }
++        }
++    }
++
++private:
++    QSvgRenderer* m_renderer{nullptr};  // owned by QGIFace
++    QRectF m_tileCoverage;
++    QPointF m_origin;
++    QSizeF m_tileSize;
++    int m_columns{0};
++    int m_rows{0};
++    qreal m_stepX{0};
++    qreal m_stepY{0};
++    long m_limit{0};
++};
++
++}  // namespace
++#endif
+ 
+ QGIFace::QGIFace(int index) :
+     projIndex(index),
+@@ -60,6 +165,10 @@
+ 
+     m_texture = QPixmap();                      //empty texture
+ 
++#if TECHDRAW_BATCH_SVG_HATCH
++    m_svgHatchArea = new BatchedSvgHatchRect();
++#else
+     m_svgHatchArea = new QGCustomRect();
++#endif
+     m_svgHatchArea->setParentItem(this);
+     m_imageSvgHatchArea = new QGCustomImage();
+@@ -267,5 +376,8 @@
+     double tilesHigh = ceil(faceOverlaySize / hTile);
+     double overlayWidth = tilesWide * wTile;
+     double overlayHeight = tilesHigh * hTile;
++#if TECHDRAW_BATCH_SVG_HATCH
++    static_cast<BatchedSvgHatchRect*>(m_svgHatchArea)->resetTiles();
++#endif
+     m_svgHatchArea->setRect(0., 0., overlayWidth,-overlayHeight);
+     m_svgHatchArea->centerAt(faceCenter);
+@@ -276,6 +388,15 @@
+         Base::Console().message("QGIF::buildSvgHatch - failed to load svg string\n");
+         return;
+     }
++#if TECHDRAW_BATCH_SVG_HATCH
++    if (tilesWide * tilesHigh > m_maxTile) {
++        Base::Console().warning("SVG tile count exceeded: %ld. Change hatch scale or raise limit.\n", m_maxTile + 1);
++    }
++    static_cast<BatchedSvgHatchRect*>(m_svgHatchArea)->configureTiles(
++        m_sharedRender, static_cast<int>(tilesWide), static_cast<int>(tilesHigh),
++        wTile, hTile, QPointF(getHatchOffset().x, getHatchOffset().y),
++        -overlayWidth, m_fillScale, m_maxTile);
++#else
+     long int tileCount = 0;
+     for (int iw = 0; iw < int(tilesWide); iw++) {
+         for (int ih = 0; ih < int(tilesHigh); ih++) {
+@@ -295,5 +416,6 @@
+             break;
+         }
+     }
++#endif
+     QPointF faceCenterToMRect = mapToItem(m_svgHatchArea, faceCenter);
+     m_svgHatchArea->setTransformOriginPoint(faceCenterToMRect);
+*** End Patch

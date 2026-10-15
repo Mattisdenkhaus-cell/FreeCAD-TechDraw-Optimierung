@@ -1,0 +1,447 @@
+diff --git a/src/Mod/TechDraw/Gui/EdgeGeometryCache.h b/src/Mod/TechDraw/Gui/EdgeGeometryCache.h
+new file mode 100644
+index 0000000..eab58d7
+--- /dev/null
++++ b/src/Mod/TechDraw/Gui/EdgeGeometryCache.h
+@@ -0,0 +1,51 @@
++// SPDX-License-Identifier: LGPL-2.1-or-later
++#ifndef TECHDRAWGUI_EDGEGEOMETRYCACHE_H
++#define TECHDRAWGUI_EDGEGEOMETRYCACHE_H
++
++#include <QPainterPath>
++#include <QPainterPathStroker>
++
++namespace TechDrawGui {
++
++// GUI-thread-only cache of the selection geometry, never of model geometry.
++// Keep a shared snapshot: even setPath() through QGraphicsPathItem is detected.
++// Qt compares shared QPainterPaths cheaply, and uses the same equality in setPath().
++class EdgeGeometryCache
++{
++public:
++    const QPainterPath& shape(const QPainterPath& path, qreal fuzz) const
++    {
++        refresh(path, fuzz);
++        return m_outline;
++    }
++
++    QRectF bounds(const QPainterPath& path, qreal fuzz) const
++    {
++        refresh(path, fuzz);
++        return m_bounds;
++    }
++
++private:
++    void refresh(const QPainterPath& path, qreal fuzz) const
++    {
++        if (m_valid && m_fuzz == fuzz && m_path == path) {
++            return;
++        }
++        QPainterPathStroker stroker;
++        stroker.setWidth(fuzz);
++        m_outline = stroker.createStroke(path);
++        m_bounds = m_outline.controlPointRect();
++        m_path = path;
++        m_fuzz = fuzz;
++        m_valid = true;
++    }
++
++    mutable QPainterPath m_path;
++    mutable QPainterPath m_outline;
++    mutable QRectF m_bounds;
++    mutable qreal m_fuzz{0};
++    mutable bool m_valid{false};
++};
++
++} // namespace TechDrawGui
++#endif
+diff --git a/src/Mod/TechDraw/Gui/QGIBatchedSvgHatch.h b/src/Mod/TechDraw/Gui/QGIBatchedSvgHatch.h
+new file mode 100644
+index 0000000..613de41
+--- /dev/null
++++ b/src/Mod/TechDraw/Gui/QGIBatchedSvgHatch.h
+@@ -0,0 +1,157 @@
++// SPDX-License-Identifier: LGPL-2.1-or-later
++#ifndef TECHDRAWGUI_QGIBATCHEDSVGHATCH_H
++#define TECHDRAWGUI_QGIBATCHEDSVGHATCH_H
++
++#include <algorithm>
++#include <cmath>
++#include <QPainter>
++#include <QPointer>
++#include <QStyleOptionGraphicsItem>
++#include <QSvgRenderer>
++#include "QGCustomRect.h"
++
++namespace TechDrawGui {
++
++// The QGIFace owns the renderer. A guarded pointer also makes destruction safe.
++// One graphics item replaces the original column-major array of SVG child items.
++class QGIBatchedSvgHatch final : public QGCustomRect
++{
++public:
++    QGIBatchedSvgHatch()
++    {
++        setFlag(QGraphicsItem::ItemUsesExtendedStyleOption, true);
++    }
++
++    ~QGIBatchedSvgHatch() override { QObject::disconnect(m_repaintConnection); }
++
++    void resetTiles()
++    {
++        prepareGeometryChange();
++        QObject::disconnect(m_repaintConnection);
++        m_renderer.clear();
++        m_coverage = QRectF();
++        m_count = 0;
++        update();
++    }
++
++    void configureTiles(QSvgRenderer* renderer, int columns, int rows,
++                        qreal stepX, qreal stepY, QPointF origin, qreal scale, long maxTiles)
++    {
++        resetTiles();
++        if (!renderer || !renderer->isValid() || columns <= 0 || rows <= 0 ||
++            !std::isfinite(stepX) || !std::isfinite(stepY) ||
++            !std::isfinite(scale) || !std::isfinite(origin.x()) ||
++            !std::isfinite(origin.y()) || stepX <= 0 || stepY <= 0 || scale <= 0) {
++            return;
++        }
++        const QSize native = renderer->defaultSize();
++        const QSizeF tile(native.width() * scale, native.height() * scale);
++        if (tile.isEmpty() || !std::isfinite(tile.width()) || !std::isfinite(tile.height())) {
++            return;
++        }
++        // Original code creates a tile, then tests tileCount > maxTiles.
++        const qint64 total = qint64(columns) * rows;
++        const qint64 count = std::min(total - 1, qint64(std::max(0L, maxTiles))) + 1;
++        const int usedColumns = int((count - 1) / rows + 1);
++        const int usedRows = int(std::min(count, qint64(rows)));
++        const QSizeF coverage((usedColumns - 1) * stepX + tile.width(),
++                              (usedRows - 1) * stepY + tile.height());
++        if (!std::isfinite(coverage.width()) || !std::isfinite(coverage.height()) ||
++            !std::isfinite(origin.x() + coverage.width()) ||
++            !std::isfinite(origin.y() + coverage.height())) {
++            return;
++        }
++        prepareGeometryChange();
++        m_renderer = renderer;
++        m_repaintConnection = QObject::connect(renderer, &QSvgRenderer::repaintNeeded,
++                                               [this]() { update(); });
++        m_columns = usedColumns;
++        m_rows = rows;
++        m_count = count;
++        m_stepX = stepX;
++        m_stepY = stepY;
++        m_origin = origin;
++        m_scale = scale;
++        m_nativeSize = native;
++        m_tileSize = tile;
++        m_coverage = QRectF(origin, coverage);
++        update();
++    }
++
++    QRectF boundingRect() const override
++    {
++        return QGCustomRect::boundingRect().united(m_coverage);
++    }
++
++    // Keep upstream placement independent of the extra advertised tile coverage.
++    void centerAt(QPointF center) override { centerAt(center.x(), center.y()); }
++    void centerAt(double x, double y) override
++    {
++        const QRectF box = QGCustomRect::boundingRect();
++        setPos(x - box.width() / 2, y - box.height() / 2);
++    }
++
++    // Public to permit a Qt-only equivalence/complexity test without GUI bindings.
++    template<class Visitor>
++    void forEachVisibleTile(const QRectF& exposed, Visitor visit) const
++    {
++        if (!m_count || !exposed.intersects(m_coverage)) {
++            return;
++        }
++        // Inclusive conservative ranges, followed by the original intersection test.
++        // Clamp as floating point BEFORE converting to int, including extreme pans.
++        const auto index = [](qreal value, int size) {
++            return int(std::max(qreal(0), std::min(qreal(size - 1), value)));
++        };
++        const int x0 = index(std::floor((exposed.left() - m_origin.x() - m_tileSize.width()) / m_stepX), m_columns);
++        const int x1 = index(std::ceil((exposed.right() - m_origin.x()) / m_stepX), m_columns);
++        const int y0 = index(std::floor((exposed.top() - m_origin.y() - m_tileSize.height()) / m_stepY), m_rows);
++        const int y1 = index(std::ceil((exposed.bottom() - m_origin.y()) / m_stepY), m_rows);
++        for (int x = x0; x <= x1; ++x) {
++            const qint64 remaining = m_count - qint64(x) * m_rows;
++            const int lastRow = int(std::min(qint64(y1), remaining - 1));
++            for (int y = y0; y <= lastRow; ++y) {
++                const QPointF position(m_origin.x() + x * m_stepX, m_origin.y() + y * m_stepY);
++                if (QRectF(position, m_tileSize).intersects(exposed)) {
++                    visit(position);
++                }
++            }
++        }
++    }
++
++    void paint(QPainter* painter, const QStyleOptionGraphicsItem* option,
++               QWidget* widget = nullptr) override
++    {
++        QGCustomRect::paint(painter, option, widget);
++        if (!m_renderer || !m_renderer->isValid()) {
++            return;
++        }
++        const QRectF exposed = option && option->exposedRect.isValid()
++            ? option->exposedRect : boundingRect();
++        forEachVisibleTile(exposed, [&](const QPointF& position) {
++            // Match QGraphicsSvgItem's local transform, including cosmetic SVG strokes.
++            painter->save();
++            painter->translate(position);
++            painter->scale(m_scale, m_scale);
++            m_renderer->render(painter, QRectF(QPointF(), m_nativeSize));
++            painter->restore();
++        });
++    }
++
++private:
++    QPointer<QSvgRenderer> m_renderer;
++    QMetaObject::Connection m_repaintConnection;
++    QRectF m_coverage;
++    QPointF m_origin;
++    QSizeF m_nativeSize;
++    QSizeF m_tileSize;
++    int m_columns{0};
++    int m_rows{0};
++    qint64 m_count{0};
++    qreal m_stepX{0};
++    qreal m_stepY{0};
++    qreal m_scale{1};
++};
++
++} // namespace TechDrawGui
++#endif
+diff --git a/src/Mod/TechDraw/Gui/QGIEdge.cpp b/src/Mod/TechDraw/Gui/QGIEdge.cpp
+index e4bb49e..2449745 100644
+--- a/src/Mod/TechDraw/Gui/QGIEdge.cpp
++++ b/src/Mod/TechDraw/Gui/QGIEdge.cpp
+@@ -91,16 +91,12 @@ QColor QGIEdge::getHiddenColor()
+ 
+ QRectF QGIEdge::boundingRect() const
+ {
+-    return shape().controlPointRect();
++    return m_geometryCache.bounds(path(), getEdgeFuzz());
+ }
+ 
+ QPainterPath QGIEdge::shape() const
+ {
+-    QPainterPath outline;
+-    QPainterPathStroker stroker;
+-    stroker.setWidth(getEdgeFuzz());
+-    outline = stroker.createStroke(path());
+-    return outline;
++    return m_geometryCache.shape(path(), getEdgeFuzz());
+ }
+ 
+ void QGIEdge::mouseDoubleClickEvent(QGraphicsSceneMouseEvent *event)
+diff --git a/src/Mod/TechDraw/Gui/QGIEdge.h b/src/Mod/TechDraw/Gui/QGIEdge.h
+index 86d60a3..68eb395 100644
+--- a/src/Mod/TechDraw/Gui/QGIEdge.h
++++ b/src/Mod/TechDraw/Gui/QGIEdge.h
+@@ -27,6 +27,7 @@
+ #include <Mod/TechDraw/TechDrawGlobal.h>
+ 
+ #include "QGIPrimPath.h"
++#include "EdgeGeometryCache.h"
+ #include "QGIUserTypes.h"
+ 
+ namespace TechDrawGui
+@@ -69,6 +70,8 @@ protected:
+     QColor getHiddenColor();
+ 
+ private:
++    EdgeGeometryCache m_geometryCache;
++
+     int projIndex;                                                     //index of edge in Projection. must exist.
+ 
+     bool isCosmetic;
+diff --git a/src/Mod/TechDraw/Gui/QGIFace.cpp b/src/Mod/TechDraw/Gui/QGIFace.cpp
+index 5bf55e6..ae81db9 100644
+--- a/src/Mod/TechDraw/Gui/QGIFace.cpp
++++ b/src/Mod/TechDraw/Gui/QGIFace.cpp
+@@ -21,6 +21,7 @@
+  ***************************************************************************/
+ 
+ # include <cmath>
++# include <limits>
+ 
+ # include <QFileInfo>
+ # include <QGraphicsView>
+@@ -39,6 +40,11 @@
+ #include "QGIFace.h"
+ #include <QByteArrayMatcher>
+ #include "QGCustomRect.h"
++#include "QGIBatchedSvgHatch.h"
++
++#ifndef TECHDRAW_BATCH_SVG_HATCH
++#define TECHDRAW_BATCH_SVG_HATCH 1
++#endif
+ #include "QGCustomSvg.h"
+ #include "QGCustomImage.h"
+ #include "QGICMark.h"
+@@ -64,7 +70,11 @@ QGIFace::QGIFace(int index) :
+ 
+     m_texture = QPixmap();                      //empty texture
+ 
++#if TECHDRAW_BATCH_SVG_HATCH
++    m_svgHatchArea = new QGIBatchedSvgHatch();
++#else
+     m_svgHatchArea = new QGCustomRect();
++#endif
+     m_svgHatchArea->setParentItem(this);
+     m_imageSvgHatchArea = new QGCustomImage();
+     m_imageSvgHatchArea->setParentItem(this);
+@@ -275,15 +285,33 @@ void QGIFace::makeMark(double x, double y)  // NOLINT readability-identifier-len
+ /// make an array of svg tiles to cover this face
+ void QGIFace::buildSvgHatch()
+ {
++    // Rebuilds must not retain tiles from a previous hatch. Keep the A/B path safe too.
++#if TECHDRAW_BATCH_SVG_HATCH
++    static_cast<QGIBatchedSvgHatch*>(m_svgHatchArea)->resetTiles();
++#else
++    const auto oldTiles = m_svgHatchArea->childItems();
++    for (auto* tile : oldTiles) {
++        delete tile;
++    }
++#endif
+     double wTile = SVGSIZEW * m_fillScale;
+     double hTile = SVGSIZEH * m_fillScale;
+     double faceWidth = path().boundingRect().width();
+     double faceHeight = path().boundingRect().height();
+     double faceOverlaySize = Preferences::svgHatchFactor() * std::max(faceWidth, faceHeight);
+     QPointF faceCenter = path().boundingRect().center();
++    if (!std::isfinite(wTile) || !std::isfinite(hTile) || wTile <= 0 || hTile <= 0 ||
++        !std::isfinite(faceOverlaySize) || faceOverlaySize <= 0) {
++        return;
++    }
+     double tilesWide = ceil(faceOverlaySize / wTile);
+     double tilesHigh = ceil(faceOverlaySize / hTile);
+ 
++    if (tilesWide >= std::numeric_limits<int>::max() ||
++        tilesHigh >= std::numeric_limits<int>::max()) {
++        Base::Console().warning("SVG hatch grid exceeds integer range\n");
++        return;
++    }
+     double overlayWidth = tilesWide * wTile;
+     double overlayHeight = tilesHigh * hTile;
+     m_svgHatchArea->setRect(0., 0., overlayWidth,-overlayHeight);
+@@ -296,6 +324,15 @@ void QGIFace::buildSvgHatch()
+         Base::Console().message("QGIF::buildSvgHatch - failed to load svg string\n");
+         return;
+     }
++#if TECHDRAW_BATCH_SVG_HATCH
++    if (tilesWide * tilesHigh > qint64(std::max(0L, m_maxTile)) + 1) {
++        Base::Console().warning("SVG tile count exceeded. Change hatch scale or raise limit.\n");
++    }
++    static_cast<QGIBatchedSvgHatch*>(m_svgHatchArea)->configureTiles(
++        m_sharedRender, static_cast<int>(tilesWide), static_cast<int>(tilesHigh),
++        wTile, hTile, QPointF(getHatchOffset().x, -overlayWidth + getHatchOffset().y),
++        m_fillScale, m_maxTile);
++#else
+     long int tileCount = 0;
+     for (int iw = 0; iw < int(tilesWide); iw++) {
+         for (int ih = 0; ih < int(tilesHigh); ih++) {
+@@ -315,6 +352,7 @@ void QGIFace::buildSvgHatch()
+             break;
+         }
+     }
++#endif
+     QPointF faceCenterToMRect = mapToItem(m_svgHatchArea, faceCenter);
+     m_svgHatchArea->setTransformOriginPoint(faceCenterToMRect);
+     m_svgHatchArea->setRotation(m_hatchRotation);
+diff --git a/src/Mod/TechDraw/Gui/QGIView.cpp b/src/Mod/TechDraw/Gui/QGIView.cpp
+index 01684d4..a77ecca 100644
+--- a/src/Mod/TechDraw/Gui/QGIView.cpp
++++ b/src/Mod/TechDraw/Gui/QGIView.cpp
+@@ -800,7 +800,7 @@ QRectF QGIView::frameRect() const
+             child->type() != UserType::QGICMark  &&
+             child->type() != UserType::QGIViewDimension &&
+             child->type() != UserType::QGIViewBalloon) {
+-            QRectF childRect = mapFromItem(child, child->boundingRect()).boundingRect();
++            QRectF childRect = mapRectFromItem(child, child->boundingRect());
+             result = result.united(childRect);
+         }
+     }
+@@ -829,7 +829,7 @@ QRectF QGIView::customChildrenBoundingRect() const
+             // area defined by the edges as in frameRect()
+             // child->type() != UserType::QGIVertex &&
+             child->type() != UserType::QGICMark) {
+-            QRectF childRect = mapFromItem(child, child->boundingRect()).boundingRect();
++            QRectF childRect = mapRectFromItem(child, child->boundingRect());
+             result = result.united(childRect);
+         }
+     }
+diff --git a/src/Mod/TechDraw/Gui/QGIViewDimension.cpp b/src/Mod/TechDraw/Gui/QGIViewDimension.cpp
+index a275c82..a34e342 100644
+--- a/src/Mod/TechDraw/Gui/QGIViewDimension.cpp
++++ b/src/Mod/TechDraw/Gui/QGIViewDimension.cpp
+@@ -175,7 +175,16 @@ void QGIViewDimension::select(bool state)
+ void QGIViewDimension::hover(bool state)
+ {
+     hasHover = state;
+-    draw();
++    // Hover changes presentation only. Keep reference geometry and label placement intact.
++    if (datumLabel->isSelected()) {
++        setPrettySel();
++    }
++    else if (hasHover) {
++        setPrettyPre();
++    }
++    else {
++        setPrettyNormal();
++    }
+ }
+ 
+ void QGIViewDimension::setViewPartFeature(TechDraw::DrawViewDimension* obj)
+@@ -2320,6 +2329,9 @@ void QGIViewDimension::setPrettyPre()
+     aHead1->setPrettyPre();
+     aHead2->setPrettyPre();
+     dimLines->setPrettyPre();
++    aHead1->update();
++    aHead2->update();
++    dimLines->update();
+ }
+ 
+ void QGIViewDimension::setPrettySel()
+@@ -2327,6 +2339,9 @@ void QGIViewDimension::setPrettySel()
+     aHead1->setPrettySel();
+     aHead2->setPrettySel();
+     dimLines->setPrettySel();
++    aHead1->update();
++    aHead2->update();
++    dimLines->update();
+ }
+ 
+ void QGIViewDimension::setPrettyNormal()
+@@ -2334,6 +2349,9 @@ void QGIViewDimension::setPrettyNormal()
+     aHead1->setPrettyNormal();
+     aHead2->setPrettyNormal();
+     dimLines->setPrettyNormal();
++    aHead1->update();
++    aHead2->update();
++    dimLines->update();
+ }
+ 
+ void QGIViewDimension::drawBorder()
+@@ -2389,10 +2407,10 @@ double QGIViewDimension::getDefaultAsmeHorizontalLeaderLength() const
+ //frame, border, caption are never shown in QGIVD, so shouldn't be in bRect
+ QRectF QGIViewDimension::boundingRect() const
+ {
+-    QRectF labelRect = mapFromItem(datumLabel, datumLabel->boundingRect()).boundingRect();
+-    QRectF linesRect = mapFromItem(dimLines, dimLines->boundingRect()).boundingRect();
+-    QRectF aHead1Rect = mapFromItem(aHead1, aHead1->boundingRect()).boundingRect();
+-    QRectF aHead2Rect = mapFromItem(aHead2, aHead2->boundingRect()).boundingRect();
++    QRectF labelRect = mapRectFromItem(datumLabel, datumLabel->boundingRect());
++    QRectF linesRect = mapRectFromItem(dimLines, dimLines->boundingRect());
++    QRectF aHead1Rect = mapRectFromItem(aHead1, aHead1->boundingRect());
++    QRectF aHead2Rect = mapRectFromItem(aHead2, aHead2->boundingRect());
+     QRectF result(labelRect);
+     result = result.united(linesRect);
+     result = result.united(aHead1Rect);

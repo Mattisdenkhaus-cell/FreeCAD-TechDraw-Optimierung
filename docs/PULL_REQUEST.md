@@ -1,0 +1,11 @@
+Große TechDraw-Zeichnungen berechnen beim Abfragen von Kanten immer wieder deren Auswahlumrisse; Hover über Maßtexte baut zusätzlich die komplette Bemaßung neu auf. Dieser Entwicklungsstand für den festgelegten FreeCAD-1.1.4-Commit `4fd3bf320d9566a27e60069fc8387448aaa3a094` vermeidet diese Wiederholungen und führt den vorhandenen SVG-Batching-Ansatz als regulären, reproduzierbaren C++-Patch fort.
+
+- Auswahlgeometrie nach Pfad und aktueller Auswahltoleranz cachen; Rechtecke ohne temporäres Polygon transformieren.
+- Bei Maßtext-Hover nur Farben und betroffene Elemente aktualisieren; geometrische Maßberechnung und Drag-/Snapping-Pfade erhalten.
+- Sichtbare SVG-Kacheln direkt eingrenzen, ursprüngliche Kachelreihenfolge/-grenze und Platzierung erhalten, Renderer-Lebensdauer absichern und A/B-Rückfall reparieren.
+- Historischen Patch und funktionierenden Windows-Workflow unverändert lassen. Neuer separater Workflow mit kurzen Linux-Tests, LibPack-Cache und ausdrücklich freizugebendem Windows-Vollbuild.
+- Benchmark-Makro und Vergleichswerkzeug ergänzen, ohne Zugriff auf die Besitzstruktur interner Qt-Grafikobjekte.
+
+Validiert: Anwendung auf sauberem Quellstand, beide SVG-Schalterstellungen, 72 pixelgleiche SVG-Szenen, 400 Kachelausschnitte, 90 Rechtecktransformationen, Auswahlgeometrie/Cachewechsel und tatsächliche geänderte Methoden in isolierten Qt-Testumgebungen. AddressSanitizer/UndefinedBehaviorSanitizer bestanden (Qt-Offscreen-Leak-Prüfung deaktiviert). Fünf Python-Tests und actionlint bestanden. Benchmark-APIs zusätzlich mit der lokal vorhandenen Linux-Version 1.0.0 erprobt; das ist kein Performance-Nachweis für die optimierte Version 1.1.4.
+
+**Noch kein neuer Windows-Vollbuild gestartet.** Vollständiges Kompilieren/Linken, portabler Start, reale Zeichnungsbenchmarks, Mausinteraktion und PDF/SVG/DXF-/Druckvergleiche bleiben vor der Freigabe notwendig. Keine behaupteten FPS oder Gesamtbeschleunigungswerte. Dieser PR bleibt bis zu diesen Prüfungen ein Entwurf. Details: `docs/VALIDIERUNG.md`, `docs/TECHNIK.md`, `benchmarks/README.md`.

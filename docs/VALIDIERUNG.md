@@ -36,6 +36,16 @@ mit unverändertem Pfad aus. Der Cache spart dort nachweisbar Stroker-Aufrufe un
 Diese Messung umfasst weder ein echtes Zeichnungsblatt noch Qt-Szenenindizierung,
 Preference-Abfragen oder GPU-Zeiten und begründet **keine FPS-/Gesamtbeschleunigungszahl**.
 
+## Benchmark-API-Smoke-Test
+
+Mit dem bereits installierten **unveränderten FreeCAD 1.0.0 unter Linux** wurde ein
+kleines Testdokument mit TechDraw-Ansicht und Bemaßung erzeugt. Das Benchmark-Werkzeug
+lief durch alle fünf Messarten mit jeweils drei Messschritten und stellte seinen
+Zustand ohne gemeldeten Fehler wieder her. Dies prüft die verwendeten Python-/Widget-
+APIs. Wegen anderer FreeCAD-Version und Offscreen-/OpenGL-Warnungen gelten diese
+Werte ausdrücklich **nicht** als Rendering- oder Performance-Nachweis für 1.1.4.
+Es wurden keine solchen Messwerte als Optimierungsergebnis übernommen.
+
 ## Noch offen
 
 - Vollständige Kompilierung/Linken von FreeCAD 1.1.4 unter Windows, Start und portable

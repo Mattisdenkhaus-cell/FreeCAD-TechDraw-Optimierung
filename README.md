@@ -42,6 +42,8 @@ Der neue Workflow **FreeCAD 1.1.4 - Optimized TechDraw** bietet:
 
 - `patch-only`: ausschließlich kurze Patch-/Python-Prüfungen.
 - `qt-tests`: zusätzlich kompilierte Qt-Tests und Sanitizer unter Linux.
+- `validate-artifact`: kurzer Start-/Exporttest eines bereits erzeugten Windows-Archivs,
+  ohne erneute Kompilierung; `artifact_run` bezeichnet dessen erfolgreichen Build-Lauf.
 - `full-build`: vollständiger Windows-Build nur bei zusätzlicher ausdrücklicher
   Bestätigung `confirm_long_build=true`. Er kann mehrere Stunden dauern.
 

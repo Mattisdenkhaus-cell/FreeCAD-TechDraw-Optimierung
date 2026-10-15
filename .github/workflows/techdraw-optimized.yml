@@ -14,7 +14,11 @@ on:
         description: 'Fast validation or explicitly approved Windows build'
         type: choice
         default: patch-only
-        options: [patch-only, qt-tests, full-build]
+        options: [patch-only, qt-tests, full-build, validate-artifact]
+      artifact_run:
+        description: 'Successful optimized full-build run ID (validate-artifact only)'
+        type: string
+        default: ''
       variant:
         description: 'Identical packaging for original/optimized A/B tests'
         type: choice
@@ -39,6 +43,7 @@ concurrency:
 
 jobs:
   quick-checks:
+    if: inputs.mode != 'validate-artifact'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -199,3 +204,72 @@ jobs:
             C:/FC/build/CMakeFiles/CMakeConfigureLog.yaml
             C:/FC/build/CMakeFiles/CMakeError.log
           if-no-files-found: ignore
+
+  validate-portable-windows:
+    if: github.event_name == 'workflow_dispatch' && inputs.mode == 'validate-artifact'
+    runs-on: windows-2022
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify source artifact run
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARTIFACT_RUN: ${{ inputs.artifact_run }}
+        run: |
+          if ($env:ARTIFACT_RUN -notmatch '^[0-9]+$') { throw 'A numeric artifact_run is required.' }
+          $metadata = gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$env:ARTIFACT_RUN"
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot read artifact provenance.' }
+          $run = $metadata | ConvertFrom-Json
+          if ($run.conclusion -ne 'success' -or $run.event -ne 'workflow_dispatch' -or
+              $run.path -ne '.github/workflows/techdraw-optimized.yml') {
+            throw 'Expected a successful manual optimized-workflow run from this repository.'
+          }
+          New-Item -ItemType Directory -Force C:/FC/smoke | Out-Null
+          $metadata | Set-Content C:/FC/smoke/build-provenance.json -Encoding utf8
+      - name: Download optimized portable artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: FreeCAD-1.1.4-TechDraw-optimized-Windows-COMPLETE
+          path: C:/FC/artifact
+          run-id: ${{ inputs.artifact_run }}
+          github-token: ${{ github.token }}
+      - name: Extract and launch portable FreeCAD with isolated configuration
+        shell: pwsh
+        run: |
+          $archive = 'C:/FC/artifact/FreeCAD-1.1.4-TechDraw-optimized-Windows-COMPLETE.7z'
+          if (!(Test-Path $archive)) { throw 'Expected portable archive is missing.' }
+          Get-FileHash $archive -Algorithm SHA256 | Format-List | Out-File C:/FC/smoke/archive-sha256.txt
+          7z x $archive '-oC:/FC/portable' -y
+          if ($LASTEXITCODE -ne 0) { throw 'Portable extraction failed.' }
+          $exe = 'C:/FC/portable/bin/FreeCAD.exe'
+          if (!(Test-Path $exe)) { throw 'Portable executable missing.' }
+          $env:TECHDRAW_SMOKE_OUTPUT = 'C:/FC/smoke'
+          $env:TECHDRAW_SMOKE_EXPECT_VERSION = '1.1.4'
+          $env:QT_QPA_PLATFORM = 'offscreen'
+          $macro = Join-Path $env:GITHUB_WORKSPACE 'scripts/portable_smoke.FCMacro'
+          $arguments = @('--user-cfg', 'C:/FC/smoke/user.cfg', '--system-cfg',
+                         'C:/FC/smoke/system.cfg', "`"$macro`"")
+          $process = Start-Process -FilePath $exe -ArgumentList $arguments -PassThru -WorkingDirectory 'C:/FC/portable/bin' `
+            -RedirectStandardOutput C:/FC/smoke/stdout.log -RedirectStandardError C:/FC/smoke/stderr.log
+          if (!$process.WaitForExit(180000)) {
+            Stop-Process -Id $process.Id -Force
+            throw 'Portable smoke test timed out after three minutes.'
+          }
+          if ($process.ExitCode -ne 0) { throw "Portable executable exited with $($process.ExitCode)." }
+          $resultPath = 'C:/FC/smoke/result.json'
+          if (!(Test-Path $resultPath)) { throw 'FreeCAD did not produce a smoke-test result.' }
+          $result = Get-Content $resultPath -Raw | ConvertFrom-Json
+          if ($result.status -ne 'passed') { throw ($result | ConvertTo-Json -Depth 5) }
+          $result | ConvertTo-Json -Depth 5
+      - name: Upload portable startup and export evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: FreeCAD-portable-smoke-${{ inputs.artifact_run }}
+          path: C:/FC/smoke
+          if-no-files-found: warn
+          retention-days: 7

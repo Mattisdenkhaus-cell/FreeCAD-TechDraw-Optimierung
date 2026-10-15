@@ -15,13 +15,19 @@ Abgeschlossene Schritte sind in getrennten Git-Commits gesichert.
    Der Windows-Job scheiterte vor der Kompilierung an CRLF-Zeilenenden im Patch.
    Die Patch-Übertragung wird jetzt auf LF normalisiert; strikte Whitespace-Prüfung
    bleibt aktiv. Zwei zusätzliche Regressionstests prüfen diesen Windows-Fall.
-   Der freigegebene Build wird mit dieser Korrektur neu gestartet.
+   Der korrigierte Lauf [38748155482](https://github.com/Mattisdenkhaus-cell/FreeCAD-TechDraw-Optimierung/actions/runs/38748155482)
+   baut Commit `1b46341cb5e7ccef49ddba2030aa61f96886c9fb`. Patchanwendung unter
+   Windows bestanden; bei dieser Aufzeichnung läuft die LibPack-/Build-Vorbereitung.
 
 ## Nächste Freigabestufe
 
 - Pull Request prüfen; schnelle Linux-CI auswerten, sofern GitHub-API/Push verfügbar.
-- Zuerst den neuesten `workflow_dispatch`-Lauf des Entwicklungsbranches prüfen;
-  keinen doppelten Vollbuild starten. Lauf `38747230182` ist bereits fehlgeschlagen.
+- Lauf `38748155482` prüfen; keinen doppelten Vollbuild starten.
+  Lauf `38747230182` ist bereits vor der Kompilierung fehlgeschlagen.
+- Nach erfolgreichem Build den kurzen Modus `validate-artifact` mit
+  `artifact_run=38748155482` auf dem Entwicklungsbranch starten. Dieser prüft
+  das entpackte Archiv mit isolierter Konfiguration und erzeugt ein eigenes
+  Ergebnisartefakt; er kompiliert FreeCAD nicht erneut.
   Nach Abschluss Logs und portables Artefakt prüfen, insbesondere echten Programmstart,
   TechDraw-Module und Ressourcen. Bei einem Fehler zunächst die Ursache isolieren.
   Ein separater `upstream`-Vergleichsbuild wurde noch nicht freigegeben.

@@ -50,7 +50,8 @@ Es wurden keine solchen Messwerte als Optimierungsergebnis übernommen.
 ## Noch offen
 
 - Vollständige Kompilierung/Linken von FreeCAD 1.1.4 unter Windows, Start und portable
-  Verpackung der optimierten Variante. Der Workflow ist vorbereitet, nicht ausgeführt.
+  Verpackung der optimierten Variante. Der korrigierte Windows-Lauf `38748155482`
+  ist gestartet; sein Endergebnis bleibt abzuwarten.
 - Original-vs-optimiert-Messungen mit großen realen Zeichnungen auf Zielhardware.
 - Mausauswahl, Erstellen/Ziehen/Snapping von Bemaßungen, Schnitt-/Detailansichten,
   Dokument-Wiederöffnung und visuelle Export-/Druckvergleiche (PDF/SVG/DXF).
@@ -59,3 +60,17 @@ Es wurden keine solchen Messwerte als Optimierungsergebnis übernommen.
 Die Tests kompilieren die neuen Header, zwei originale Qt-Elementklassen und gezielt
 extrahierte geänderte Methodenkörper. FreeCAD-/OCCT-abhängige Klassen werden dabei
 nicht vollständig gebaut. Diese Grenze wird nicht durch statische Checks aufgehoben.
+
+## Vorbereitung der portablen Startprüfung
+
+`scripts/portable_smoke.FCMacro` wird im Workflow-Modus `validate-artifact` mit dem
+entpackten Windows-Programm und separaten Konfigurationsdateien ausgeführt. Geprüft
+werden Version/Module, projizierte Kanten, Bemaßung, SVG-Schraffur, öffentliche
+Kantenauswahl, Maßtext-Eigenschaftsänderung, PDF/SVG/DXF-Dateierzeugung und erneutes
+Öffnen der gespeicherten FCStd-Datei. Die asynchrone Projektion wird begrenzt abgewartet.
+Die Datei-Erzeugung beweist keine visuelle Exportgleichheit.
+
+Das Makro ist mit dem vorhandenen Linux-FreeCAD 1.0.0 erfolgreich erprobt, einschließlich
+aller fünf Prüfgruppen. Windows-1.1.4-Ergebnisse werden erst nach erfolgreichem
+Artefaktbuild erfasst. Der GUI-Start erfolgt offscreen; GPU-/Displayqualität ist damit
+nicht bewertet. Die neue Workflow-Variante wurde mit actionlint geprüft.

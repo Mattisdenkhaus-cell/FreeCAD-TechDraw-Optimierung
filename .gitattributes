@@ -1,0 +1,2 @@
+# Unified patches must keep LF context lines even on Windows checkouts.
+patches/*.patch text eol=lf

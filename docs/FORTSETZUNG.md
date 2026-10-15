@@ -11,13 +11,17 @@ Abgeschlossene Schritte sind in getrennten Git-Commits gesichert.
    Lauf [38747230182](https://github.com/Mattisdenkhaus-cell/FreeCAD-TechDraw-Optimierung/actions/runs/38747230182)
    wurde mit `mode=full-build`, `variant=optimized`, `parallel_jobs=2` gestartet.
    Gebauter Commit: `4a04e9324f21f2a7249d7ce4747cef86529cdcc8`.
-   Die vorgeschalteten Qt-/Python-/Sanitizer-Prüfungen sind erfolgreich abgeschlossen.
-   Bei dieser Aufzeichnung läuft der Windows-Job; das Endergebnis ist noch offen.
+   Die vorgeschalteten Qt-/Python-/Sanitizer-Prüfungen waren erfolgreich.
+   Der Windows-Job scheiterte vor der Kompilierung an CRLF-Zeilenenden im Patch.
+   Die Patch-Übertragung wird jetzt auf LF normalisiert; strikte Whitespace-Prüfung
+   bleibt aktiv. Zwei zusätzliche Regressionstests prüfen diesen Windows-Fall.
+   Der freigegebene Build wird mit dieser Korrektur neu gestartet.
 
 ## Nächste Freigabestufe
 
 - Pull Request prüfen; schnelle Linux-CI auswerten, sofern GitHub-API/Push verfügbar.
-- Zuerst den vorhandenen Lauf `38747230182` prüfen; keinen doppelten Vollbuild starten.
+- Zuerst den neuesten `workflow_dispatch`-Lauf des Entwicklungsbranches prüfen;
+  keinen doppelten Vollbuild starten. Lauf `38747230182` ist bereits fehlgeschlagen.
   Nach Abschluss Logs und portables Artefakt prüfen, insbesondere echten Programmstart,
   TechDraw-Module und Ressourcen. Bei einem Fehler zunächst die Ursache isolieren.
   Ein separater `upstream`-Vergleichsbuild wurde noch nicht freigegeben.

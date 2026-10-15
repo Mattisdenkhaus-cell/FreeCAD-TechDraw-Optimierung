@@ -27,8 +27,9 @@ Lokale Umgebung: Debian 13, Qt 5.15.15, g++, Raster-Offscreen-Qt-Tests.
 - AddressSanitizer und UndefinedBehaviorSanitizer in beiden Schalterstellungen ohne
   Befund. Leak-Prüfung wegen globaler Qt-Offscreen-Objekte deaktiviert; dies ist kein
   vollständiger Leak-Nachweis für FreeCAD.
-- Fünf Python-Tests: falscher Quellcommit wird ohne Dateiverlust abgewiesen,
-  Benchmark-Statistik und Ablehnung inkompatibler/fehlerhafter Messdaten.
+- Sieben Python-Tests: falscher Quellcommit wird ohne Dateiverlust abgewiesen,
+  Benchmark-Statistik und Ablehnung inkompatibler/fehlerhafter Messdaten; zusätzlich
+  CRLF-Patchanwendung und weiterhin wirksame Whitespace-Prüfung unter Windows.
 - Neuer Workflow mit actionlint 1.7.7 geprüft. Historischer Patch und Workflow unverändert.
 
 Der Qt-Test gibt einen Mikrobenchmark für wiederholte Umriss-/Bounding-Rect-Abfragen

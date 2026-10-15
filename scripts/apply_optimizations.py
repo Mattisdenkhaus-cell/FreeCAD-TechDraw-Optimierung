@@ -10,16 +10,19 @@ PATCH = Path(__file__).resolve().parents[1] / 'patches/FreeCAD-1.1.4-TechDraw-pe
 
 def apply(source, check_only=False):
     source = Path(source).resolve()
-    def git(*args):
+    def git(*args, input_bytes=None):
         return subprocess.run(['git', '-C', str(source), *args], check=True,
-                              text=True, capture_output=True).stdout.strip()
+                              input=input_bytes, capture_output=True).stdout.decode("utf-8").strip()
     if git('rev-parse', 'HEAD') != UPSTREAM_COMMIT:
         raise RuntimeError('Refusing to patch: checkout is not the verified FreeCAD 1.1.4 commit.')
     if git('status', '--porcelain', '--untracked-files=normal'):
         raise RuntimeError('Refusing to patch a modified checkout; preserve changes and use a clean source copy.')
-    git('apply', '--check', '--whitespace=error-all', str(PATCH))
+    # Git for Windows may check out external patch files with CRLF. Normalize
+    # the patch transport, not the target source; retain strict whitespace checks.
+    patch_bytes = PATCH.read_bytes().replace(b'\r\n', b'\n')
+    git('apply', '--check', '--whitespace=error-all', '-', input_bytes=patch_bytes)
     if not check_only:
-        git('apply', '--whitespace=error-all', str(PATCH))
+        git('apply', '--whitespace=error-all', '-', input_bytes=patch_bytes)
         git('diff', '--check')
     print(f'PASS: {"checked" if check_only else "applied"} combined patch at {UPSTREAM_COMMIT}')
 
@@ -32,4 +35,7 @@ if __name__ == '__main__':
     try:
         apply(args.source, args.check)
     except (RuntimeError, subprocess.CalledProcessError) as error:
-        parser.exit(1, f'{error}\n{getattr(error, "stderr", "")}')
+        stderr = getattr(error, 'stderr', b'') or b''
+        if isinstance(stderr, bytes):
+            stderr = stderr.decode('utf-8', errors='replace')
+        parser.exit(1, f'{error}\n{stderr}')

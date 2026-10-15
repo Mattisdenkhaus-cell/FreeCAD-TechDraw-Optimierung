@@ -5,12 +5,15 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
+
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'benchmarks'))
 sys.path.insert(0, str(ROOT / 'scripts'))
 from compare import CONDITIONS, compare
 from techdraw_bench import summary
+import apply_optimizations
 from apply_optimizations import apply
 
 
@@ -48,6 +51,46 @@ class SummaryTests(unittest.TestCase):
 
 
 class PatchSafetyTests(unittest.TestCase):
+    def check_patch_line_endings(self, trailing_space=False):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            repo = root / 'source'
+            repo.mkdir()
+            def git(*args):
+                return subprocess.check_output(['git', '-C', str(repo), *args])
+            git('init', '-q')
+            target = repo / 'edge.cpp'
+            original = b'int before = 1;\n'
+            target.write_bytes(original)
+            git('add', 'edge.cpp')
+            git('-c', 'user.name=Test', '-c', 'user.email=test@example.invalid',
+                'commit', '-qm', 'fixture')
+            commit = git('rev-parse', 'HEAD').decode().strip()
+            updated = b'int after = 2;' + (b' ' if trailing_space else b'') + b'\n'
+            target.write_bytes(updated)
+            patch_bytes = git('diff', '--binary').replace(b'\n', b'\r\n')
+            target.write_bytes(original)
+            patch_file = root / 'windows.patch'
+            patch_file.write_bytes(patch_bytes)
+            with patch.object(apply_optimizations, 'UPSTREAM_COMMIT', commit), \
+                    patch.object(apply_optimizations, 'PATCH', patch_file):
+                if trailing_space:
+                    with self.assertRaises(subprocess.CalledProcessError):
+                        apply(repo)
+                    self.assertEqual(target.read_bytes(), original)
+                else:
+                    apply(repo, check_only=True)
+                    self.assertEqual(target.read_bytes(), original)
+                    apply(repo)
+                    self.assertEqual(target.read_bytes(), updated)
+                    self.assertEqual(git('diff', '--check'), b'')
+
+    def test_crlf_patch_applies_to_lf_source(self):
+        self.check_patch_line_endings()
+
+    def test_crlf_normalization_keeps_whitespace_validation(self):
+        self.check_patch_line_endings(trailing_space=True)
+
     def test_wrong_commit_is_not_modified(self):
         with tempfile.TemporaryDirectory() as directory:
             subprocess.run(['git', 'init', '-q', directory], check=True)

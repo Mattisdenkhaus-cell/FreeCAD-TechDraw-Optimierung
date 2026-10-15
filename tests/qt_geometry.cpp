@@ -216,7 +216,7 @@ static void svgPixels()
     std::cout << "PASS SVG pixel equivalence: " << images << " scenes; renderer lifetime\n";
 }
 
-static void microbenchmark()
+[[maybe_unused]] static void microbenchmark()
 {
     QPainterPath path;
     for (int i = 0; i < 30; ++i) path.cubicTo(i, 4, i + 2, -4, i + 5, 3);
@@ -235,11 +235,17 @@ static void microbenchmark()
               << " cached_ns=" << cached << " checksum=" << sink << '\n';
 }
 
+void integrationChecks();
+void hatchIntegrationChecks();
+
 int main(int argc, char** argv)
 {
     QApplication app(argc, argv);
     try {
-        edgeGeometry(); mappedBounds(); tileRanges(); svgPixels(); microbenchmark();
+        edgeGeometry(); mappedBounds(); tileRanges(); svgPixels(); integrationChecks(); hatchIntegrationChecks();
+#if TECHDRAW_BATCH_SVG_HATCH
+        microbenchmark();
+#endif
     } catch (const std::exception& error) {
         std::cerr << "FAIL: " << error.what() << '\n';
         return 1;

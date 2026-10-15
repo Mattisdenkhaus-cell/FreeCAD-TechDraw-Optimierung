@@ -1,0 +1,10 @@
+# Run in FreeCAD 1.1.4 with a drawing open. Never accesses QGraphicsScene/items().
+from pathlib import Path
+import importlib.util
+
+path = Path(__file__).resolve().with_name('techdraw_bench.py')
+spec = importlib.util.spec_from_file_location('techdraw_bench', path)
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+# Keep the runner alive while QTimer callbacks execute.
+TECHDRAW_BENCH_RUNNER = module.start()

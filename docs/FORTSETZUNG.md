@@ -29,8 +29,10 @@ exakten offiziellen Quellstand und wenden den Patch an. Das Projekt-Checkout der
 isolierten Cloud-Aufgabe weiterverwenden; keinen Git-Worktree ohne ausdrücklichen
 Auftrag erzeugen. Bestehende Änderungen vor jeder Aktion prüfen und erhalten.
 
-GitHub-API-Anfragen wurden in dieser Cloud-Sitzung vom Netzwerkproxy mit HTTP 403
-abgewiesen. `api.github.com` ist ergänzend im Umgebungskonfigurationsentwurf
-vorgesehen; ein gespeicherter Entwurf ist noch keine aktive Netzwerkfreigabe.
-Vor erneutem PR-Versuch den tatsächlichen Zugriff prüfen, vorhandene Authentifizierung
-verwenden und keine Tokens in Dateien oder Chat kopieren.
+## GitHub-Stand
+
+Entwurfs-PR: https://github.com/Mattisdenkhaus-cell/FreeCAD-TechDraw-Optimierung/pull/1
+Der Entwicklungsbranch ist gepusht. Vorhandene Plattformauthentifizierung genügt;
+keine zusätzlichen Tokens nötig. Die für die GitHub-API benötigte Domain
+`api.github.com` ist im Umgebungskonfigurationsentwurf ergänzt. Eine Veröffentlichung
+der Umgebung wird damit nicht behauptet.

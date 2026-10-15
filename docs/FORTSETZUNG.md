@@ -7,15 +7,21 @@ Abgeschlossene Schritte sind in getrennten Git-Commits gesichert.
 2. Gemeinsamer C++-Patch mit Kanten-Cache, Rechtecktransformationen,
    Hover-Farbupdates und abgesichertem SVG-Batching implementiert und lokal getestet.
 3. Neuer separater Workflow, Benchmark-Werkzeug und Dokumentation vorhanden.
-4. Vor dem ersten neuen Windows-Vollbuild ausdrücklich die Zustimmung einholen.
-   Kein mehrstündiger Build wurde gestartet.
+4. Die ausdrückliche Zustimmung zum optimierten Windows-Vollbuild liegt vor.
+   Lauf [38747230182](https://github.com/Mattisdenkhaus-cell/FreeCAD-TechDraw-Optimierung/actions/runs/38747230182)
+   wurde mit `mode=full-build`, `variant=optimized`, `parallel_jobs=2` gestartet.
+   Gebauter Commit: `4a04e9324f21f2a7249d7ce4747cef86529cdcc8`.
+   Die vorgeschalteten Qt-/Python-/Sanitizer-Prüfungen sind erfolgreich abgeschlossen.
+   Bei dieser Aufzeichnung läuft der Windows-Job; das Endergebnis ist noch offen.
 
 ## Nächste Freigabestufe
 
 - Pull Request prüfen; schnelle Linux-CI auswerten, sofern GitHub-API/Push verfügbar.
-- Nach ausdrücklicher Zustimmung zunächst Windows `optimized` bauen; bei Bedarf
-  `upstream` für Vergleichsmessungen mit identischer Toolchain. Der historische
-  Workflow und SVG-Patch stehen weiterhin unverändert zur Verfügung.
+- Zuerst den vorhandenen Lauf `38747230182` prüfen; keinen doppelten Vollbuild starten.
+  Nach Abschluss Logs und portables Artefakt prüfen, insbesondere echten Programmstart,
+  TechDraw-Module und Ressourcen. Bei einem Fehler zunächst die Ursache isolieren.
+  Ein separater `upstream`-Vergleichsbuild wurde noch nicht freigegeben.
+  Historischer Workflow und SVG-Patch stehen weiterhin unverändert zur Verfügung.
 - Portable Ausgabe separat entpacken, mit getrennten Einstellungsdateien starten,
   Funktions-/Exportcheckliste aus `benchmarks/README.md` abarbeiten.
 - Große reale Zeichnungen mit und ohne SVG-Schraffuren messen; erst dann Aussagen

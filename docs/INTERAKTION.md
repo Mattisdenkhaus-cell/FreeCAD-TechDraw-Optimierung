@@ -9,7 +9,7 @@ keine Autodesk-Implementierung oder proprietäre Quelle wird verwendet.
 
 | Konzept | FreeCAD-Pfad | Konsequenz |
 |---|---|---|
-| Hintergrundprojektion | `DrawViewPart::makeGeometryForShape`: `QtConcurrent::run`, HLR-Watcher; Flächenermittlung ebenfalls asynchron | Keine zusätzlichen GUI-/Dokumentzugriffe in Worker verschieben. |
+| Hintergrundprojektion | `DrawViewPart::buildGeometryObject`: `QtConcurrent::run`, HLR-Watcher; Flächenermittlung ebenfalls asynchron | Keine zusätzlichen GUI-/Dokumentzugriffe in Worker verschieben. |
 | Hintergrundschnitt | `DrawViewSection.cpp`: Schnitt-Future mit Watcher | Vorhandene Fertigstellung und Invalidierung beibehalten. |
 | Geometriespeicher | `DrawViewPart`/`GeometryObject`, getrennt von `QGIViewPart` und Zeichenprimitiven | Bildschirmvorschau darf diese exakte Geometrie nicht ersetzen. |
 | Grobdarstellung | `CoarseView`, polygonale HLR; beeinflusst auch Flächenbehandlung | Kein geeigneter Ersatz für eine reine Interaktionsvorschau. |

@@ -55,6 +55,150 @@ index 0000000..eab58d7
 +
 +} // namespace TechDrawGui
 +#endif
+diff --git a/src/Mod/TechDraw/Gui/NavigationPreview.h b/src/Mod/TechDraw/Gui/NavigationPreview.h
+new file mode 100644
+index 0000000..d860cec
+--- /dev/null
++++ b/src/Mod/TechDraw/Gui/NavigationPreview.h
+@@ -0,0 +1,138 @@
++// SPDX-License-Identifier: LGPL-2.1-or-later
++#ifndef TECHDRAWGUI_NAVIGATIONPREVIEW_H
++#define TECHDRAWGUI_NAVIGATIONPREVIEW_H
++
++#include <QGraphicsScene>
++#include <QGraphicsView>
++#include <QImage>
++#include <QPainter>
++#include <QPointer>
++#include <QTimer>
++#include <cmath>
++
++namespace TechDrawGui {
++
++// GUI-thread-only, transient screen cache. Scene items and all geometry stay live.
++// QGraphicsScene::render and QGraphicsView::render never use this preview.
++class NavigationPreview : public QObject
++{
++public:
++    explicit NavigationPreview(QGraphicsView* view)
++        : QObject(view), m_view(view), m_scene(view->scene())
++    {
++        m_idle.setSingleShot(true);
++        m_idle.setInterval(120);
++        connect(&m_idle, &QTimer::timeout, this, [this] { invalidate(); });
++        if (m_scene) {
++            connect(m_scene, &QGraphicsScene::changed, this, [this] { invalidate(); });
++            connect(m_scene, &QGraphicsScene::selectionChanged, this, [this] { invalidate(); });
++            connect(m_scene, &QObject::destroyed, this, [this] { invalidate(); });
++        }
++    }
++
++    void invalidate()
++    {
++        const bool hadImage = !m_image.isNull();
++        m_idle.stop();
++        m_image = QImage();
++        if (hadImage)
++            m_view->viewport()->update(); // coalesced exact redraw, never synchronous repaint
++    }
++
++    bool begin()
++    {
++        if (!m_scene || m_view->scene() != m_scene || !m_view->isVisible() ||
++            !m_view->viewportTransform().isInvertible() ||
++            !m_view->viewport()->autoFillBackground())
++            return false;
++        const QBrush base = m_view->viewport()->palette().brush(m_view->viewport()->backgroundRole());
++        if (base.style() != Qt::SolidPattern || base.color().alpha() != 255)
++            return false;
++        if (!usable()) {
++            invalidate();
++            m_size = m_view->viewport()->size();
++            m_dpr = m_view->viewport()->devicePixelRatioF();
++            // One viewport plus 25% reserve on each side, bounded independently of scene size.
++            m_source = QRect(QPoint(), m_size).adjusted(-m_size.width() / 4, -m_size.height() / 4,
++                                                       m_size.width() / 4, m_size.height() / 4);
++            const QSize pixels = rasterSize(m_source.size(), m_dpr);
++            if (pixels.isEmpty())
++                return false;
++            m_image = QImage(pixels, QImage::Format_ARGB32_Premultiplied);
++            if (m_image.isNull())
++                return false;
++            m_image.setDevicePixelRatio(m_dpr);
++            m_image.fill(Qt::transparent);
++            m_transform = m_view->viewportTransform();
++            m_hints = m_view->renderHints();
++            m_baseBrush = base;
++            QPainter painter(&m_image);
++            painter.setRenderHints(m_hints);
++            // Match QWidget's erased backing store before the (possibly transparent)
++            // TechDraw background is painted. Never composite it twice over itself.
++            const QRectF target(QPointF(), QSizeF(m_source.size()));
++            painter.fillRect(target, m_baseBrush);
++            m_view->render(&painter, target, m_source, Qt::IgnoreAspectRatio);
++        }
++        m_idle.start();
++        return true;
++    }
++
++    bool paint(QPainter& painter)
++    {
++        if (!usable()) {
++            invalidate();
++            return false;
++        }
++        painter.save();
++        painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
++        painter.setWorldTransform(m_transform.inverted() * m_view->viewportTransform());
++        painter.drawImage(QRectF(m_source), m_image);
++        painter.restore();
++        return true;
++    }
++
++    bool active() const { return !m_image.isNull(); }
++    qint64 bytes() const { return m_image.sizeInBytes(); }
++    static constexpr qint64 maxBytes = 64 * 1024 * 1024;
++    static QSize rasterSize(const QSize& logical, qreal dpr)
++    {
++        const double width = std::ceil(logical.width() * dpr);
++        const double height = std::ceil(logical.height() * dpr);
++        if (!(dpr > 0 && width > 0 && height > 0) || width > 32768 || height > 32768 ||
++            width * height * 4 > maxBytes)
++            return {};
++        return QSize(static_cast<int>(width), static_cast<int>(height));
++    }
++
++private:
++    bool usable() const
++    {
++        if (m_image.isNull() || !m_scene || m_view->scene() != m_scene ||
++            m_size != m_view->viewport()->size() ||
++            m_dpr != m_view->viewport()->devicePixelRatioF() || m_hints != m_view->renderHints() ||
++            !m_view->viewport()->autoFillBackground() ||
++            m_baseBrush != m_view->viewport()->palette().brush(m_view->viewport()->backgroundRole()))
++            return false;
++        bool invertible = false;
++        const QTransform inverse = (m_transform.inverted() * m_view->viewportTransform())
++                                       .inverted(&invertible);
++        // Require complete coverage, even for rotation/shear; otherwise draw exact vectors.
++        return invertible && QRectF(m_source).contains(
++            inverse.mapRect(QRectF(QPointF(), QSizeF(m_size))));
++    }
++
++    QGraphicsView* m_view;
++    QPointer<QGraphicsScene> m_scene;
++    QTimer m_idle;
++    QImage m_image;
++    QRect m_source;
++    QSize m_size;
++    qreal m_dpr = 1;
++    QTransform m_transform;
++    QPainter::RenderHints m_hints;
++    QBrush m_baseBrush;
++};
++
++} // namespace TechDrawGui
++#endif
 diff --git a/src/Mod/TechDraw/Gui/QGIBatchedSvgHatch.h b/src/Mod/TechDraw/Gui/QGIBatchedSvgHatch.h
 new file mode 100644
 index 0000000..613de41
@@ -445,3 +589,213 @@ index a275c82..a34e342 100644
      QRectF result(labelRect);
      result = result.united(linesRect);
      result = result.united(aHead1Rect);
+diff --git a/src/Mod/TechDraw/Gui/QGVNavStyle.cpp b/src/Mod/TechDraw/Gui/QGVNavStyle.cpp
+index 99d0ccd..4cac942 100644
+--- a/src/Mod/TechDraw/Gui/QGVNavStyle.cpp
++++ b/src/Mod/TechDraw/Gui/QGVNavStyle.cpp
+@@ -297,6 +297,8 @@ void QGVNavStyle::zoom(double factor)
+     }
+ 
+     setAnchor();
++    if (factor != 1.0)
++        getViewer()->beginNavigationPreview();
+     getViewer()->scale(factor, factor);
+     m_zoomPending = false;
+ }
+@@ -357,6 +359,8 @@ void QGVNavStyle::startPan(QPoint p)
+ 
+ void QGVNavStyle::pan(QPoint p)
+ {
++    if (p != panOrigin)
++        getViewer()->beginNavigationPreview();
+     QScrollBar* horizontalScrollbar = getViewer()->horizontalScrollBar();
+     QScrollBar* verticalScrollbar = getViewer()->verticalScrollBar();
+     QPoint direction = p - panOrigin;
+diff --git a/src/Mod/TechDraw/Gui/QGVPage.cpp b/src/Mod/TechDraw/Gui/QGVPage.cpp
+index 7188fd7..5c9a548 100644
+--- a/src/Mod/TechDraw/Gui/QGVPage.cpp
++++ b/src/Mod/TechDraw/Gui/QGVPage.cpp
+@@ -47,6 +47,7 @@
+ #include <Mod/TechDraw/App/DrawSVGTemplate.h>
+ 
+ #include "MDIViewPage.h"
++#include "NavigationPreview.h"
+ #include "PreferencesGui.h"
+ #include "QGSPage.h"
+ #include "QGVNavStyleBlender.h"
+@@ -145,6 +146,7 @@ QGVPage::QGVPage(ViewProviderPage* vpPage, QGSPage* scenePage, QWidget* parent)
+     setObjectName(QString::fromLocal8Bit(name));
+ 
+     setScene(scenePage);
++    m_navigationPreview = std::make_unique<NavigationPreview>(this);
+     setMouseTracking(true);
+     viewport()->setMouseTracking(true);
+ 
+@@ -257,6 +259,7 @@ void QGVPage::setNavigationStyle(std::string navParm)
+ 
+ void QGVPage::activateHandler(TechDrawHandler* newHandler)
+ {
++    m_navigationPreview->invalidate();
+     if (toolHandler) {
+         toolHandler->deactivate();
+     }
+@@ -275,6 +278,7 @@ void QGVPage::deactivateHandler()
+ 
+ void QGVPage::startBalloonPlacing(DrawView* parent)
+ {
++    m_navigationPreview->invalidate();
+     balloonPlacing = true;
+     m_balloonParent = parent;
+     activateCursor(
+@@ -289,7 +293,7 @@ void QGVPage::cancelBalloonPlacing()
+     resetCursor();
+ }
+ 
+-void QGVPage::drawBackground(QPainter* painter, const QRectF&)
++void QGVPage::drawBackground(QPainter* painter, const QRectF& rect)
+ {
+     //Note: Background is not part of scene()
+     if (!drawBkg)
+@@ -303,18 +307,14 @@ void QGVPage::drawBackground(QPainter* painter, const QRectF&)
+         return;
+     }
+ 
+-    painter->save();
+-    painter->resetTransform();
+-
+-    painter->setBrush(*bkgBrush);
+-    painter->drawRect(
+-        viewport()->rect().adjusted(-2, -2, 2, 2));//just bigger than viewport to prevent artifacts
+-
+-    painter->restore();
++    // Respect the supplied scene rectangle, also for partial paints and an overscan
++    // render target. Resetting to viewport coordinates draws borders into that target.
++    painter->fillRect(rect, *bkgBrush);
+ }
+ 
+ void QGVPage::setRenderer(RendererType type)
+ {
++    m_navigationPreview->invalidate();
+     m_renderer = type;
+ 
+     if (m_renderer == RendererType::OpenGL) {
+@@ -325,7 +325,10 @@ void QGVPage::setRenderer(RendererType type)
+     }
+     else {
+         setViewport(new QWidget);
+-        setViewportUpdateMode(QGraphicsView::FullViewportUpdate);
++        const bool partial = type == RendererType::Native &&
++            Preferences::getPreferenceGroup("General")->GetBool("PartialViewportUpdates", false);
++        setViewportUpdateMode(partial ? QGraphicsView::MinimalViewportUpdate
++                                      : QGraphicsView::FullViewportUpdate);
+     }
+ }
+ 
+@@ -340,6 +343,11 @@ void QGVPage::setHighQualityAntialiasing(bool highQualityAntialiasing)
+ 
+ void QGVPage::paintEvent(QPaintEvent* event)
+ {
++    if (m_renderer == RendererType::Native && m_navigationPreview->active()) {
++        QPainter painter(viewport());
++        if (m_navigationPreview->paint(painter))
++            return;
++    }
+     if (m_renderer == RendererType::Image) {
+         if (m_image.size() != viewport()->size()) {
+             m_image = QImage(viewport()->size(), QImage::Format_ARGB32_Premultiplied);
+@@ -381,6 +389,14 @@ void QGVPage::pseudoContextEvent()
+     }
+ }
+ 
++void QGVPage::beginNavigationPreview()
++{
++    if (m_renderer == RendererType::Native && !toolHandler && !balloonPlacing &&
++        Preferences::getPreferenceGroup("General")->GetBool("NavigationPreview", false)) {
++        m_navigationPreview->begin();
++    }
++}
++
+ void QGVPage::wheelEvent(QWheelEvent* event)
+ {
+     m_navStyle->handleWheelEvent(event);
+@@ -415,12 +431,14 @@ void QGVPage::keyReleaseEvent(QKeyEvent* event)
+ 
+ void QGVPage::focusOutEvent(QFocusEvent* event)
+ {
++    m_navigationPreview->invalidate();
+     Q_UNUSED(event);
+     m_navStyle->handleFocusOutEvent(event);
+ }
+ 
+ void QGVPage::kbPanScroll(int xMove, int yMove)
+ {
++    beginNavigationPreview();
+     if (xMove != 0) {
+         QScrollBar* hsb = horizontalScrollBar();
+         //        int hRange = hsb->maximum() - hsb->minimum();     //default here is 100?
+@@ -461,6 +479,7 @@ void QGVPage::leaveEvent(QEvent* event)
+ 
+ void QGVPage::mousePressEvent(QMouseEvent* event)
+ {
++    m_navigationPreview->invalidate();
+     if (toolHandler && (event->button() != Qt::MiddleButton)) {
+         toolHandler->mousePressEvent(event);
+     }
+@@ -557,6 +576,12 @@ void QGVPage::zoomOut()
+     m_navStyle->zoomOut();
+ }
+ 
++void QGVPage::showGrid(bool state)
++{
++    m_navigationPreview->invalidate();
++    m_showGrid = state;
++}
++
+ void QGVPage::drawForeground(QPainter* painter, const QRectF& rect)
+ {
+     Q_UNUSED(rect);
+@@ -571,6 +596,7 @@ void QGVPage::drawForeground(QPainter* painter, const QRectF& rect)
+ 
+ void QGVPage::makeGrid(int gridWidth, int gridHeight, double gridStep)
+ {
++    m_navigationPreview->invalidate();
+     QPainterPath grid;
+     double width = Rez::guiX(gridWidth);
+     double height = Rez::guiX(gridHeight);
+diff --git a/src/Mod/TechDraw/Gui/QGVPage.h b/src/Mod/TechDraw/Gui/QGVPage.h
+index aaa9d14..0ea422a 100644
+--- a/src/Mod/TechDraw/Gui/QGVPage.h
++++ b/src/Mod/TechDraw/Gui/QGVPage.h
+@@ -60,6 +60,7 @@ class DrawWeldSymbol;
+ 
+ namespace TechDrawGui
+ {
++class NavigationPreview;
+ class MDIViewPage;
+ class QGSPage;
+ class QGIView;
+@@ -99,7 +100,7 @@ public:
+     TechDraw::DrawPage* getDrawPage();
+ 
+     void makeGrid(int width, int height, double step);
+-    void showGrid(bool state) { m_showGrid = state; }
++    void showGrid(bool state);
+     void updateViewport() { viewport()->repaint(); }
+ 
+     void activateHandler(TechDrawHandler* newHandler);
+@@ -127,6 +128,7 @@ public:
+ 
+     TechDraw::DrawView* getBalloonParent() { return m_balloonParent; }
+ 
++    void beginNavigationPreview();
+     void zoomIn();
+     void zoomOut();
+ 
+@@ -166,6 +168,7 @@ protected:
+ 
+ private:
+     RendererType m_renderer;
++    std::unique_ptr<NavigationPreview> m_navigationPreview;
+ 
+     bool drawBkg;
+     QBrush* bkgBrush;

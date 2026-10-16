@@ -235,6 +235,7 @@ static void svgPixels()
               << " cached_ns=" << cached << " checksum=" << sink << '\n';
 }
 
+void navigationChecks();
 void integrationChecks();
 void hatchIntegrationChecks();
 
@@ -242,7 +243,7 @@ int main(int argc, char** argv)
 {
     QApplication app(argc, argv);
     try {
-        edgeGeometry(); mappedBounds(); tileRanges(); svgPixels(); integrationChecks(); hatchIntegrationChecks();
+        edgeGeometry(); mappedBounds(); tileRanges(); svgPixels(); integrationChecks(); hatchIntegrationChecks(); navigationChecks();
 #if TECHDRAW_BATCH_SVG_HATCH
         microbenchmark();
 #endif

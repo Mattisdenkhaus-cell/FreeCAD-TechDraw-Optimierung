@@ -57,10 +57,10 @@ index 0000000..eab58d7
 +#endif
 diff --git a/src/Mod/TechDraw/Gui/NavigationPreview.h b/src/Mod/TechDraw/Gui/NavigationPreview.h
 new file mode 100644
-index 0000000..d860cec
+index 0000000..418f05a
 --- /dev/null
 +++ b/src/Mod/TechDraw/Gui/NavigationPreview.h
-@@ -0,0 +1,138 @@
+@@ -0,0 +1,149 @@
 +// SPDX-License-Identifier: LGPL-2.1-or-later
 +#ifndef TECHDRAWGUI_NAVIGATIONPREVIEW_H
 +#define TECHDRAWGUI_NAVIGATIONPREVIEW_H
@@ -118,8 +118,16 @@ index 0000000..d860cec
 +            // One viewport plus 25% reserve on each side, bounded independently of scene size.
 +            m_source = QRect(QPoint(), m_size).adjusted(-m_size.width() / 4, -m_size.height() / 4,
 +                                                       m_size.width() / 4, m_size.height() / 4);
-+            const QSize pixels = rasterSize(m_source.size(), m_dpr);
++            QSize pixels = rasterSize(m_source.size(), m_dpr);
 +            if (pixels.isEmpty())
++                return false;
++            // Align the capture origin to physical pixels. An integer logical
++            // margin can otherwise introduce a second subpixel sampling at 125% DPI.
++            m_origin = QPointF(std::floor(m_source.x() * m_dpr) / m_dpr,
++                               std::floor(m_source.y() * m_dpr) / m_dpr);
++            pixels += QSize(1, 1); // room for the subpixel offset, also included in the budget
++            if (pixels.width() > 32768 || pixels.height() > 32768 ||
++                qint64(pixels.width()) * pixels.height() * 4 > maxBytes)
 +                return false;
 +            m_image = QImage(pixels, QImage::Format_ARGB32_Premultiplied);
 +            if (m_image.isNull())
@@ -133,8 +141,8 @@ index 0000000..d860cec
 +            painter.setRenderHints(m_hints);
 +            // Match QWidget's erased backing store before the (possibly transparent)
 +            // TechDraw background is painted. Never composite it twice over itself.
-+            const QRectF target(QPointF(), QSizeF(m_source.size()));
-+            painter.fillRect(target, m_baseBrush);
++            const QRectF target(QPointF(m_source.topLeft()) - m_origin, QSizeF(m_source.size()));
++            painter.fillRect(QRectF(QPointF(), QSizeF(pixels) / m_dpr), m_baseBrush);
 +            m_view->render(&painter, target, m_source, Qt::IgnoreAspectRatio);
 +        }
 +        m_idle.start();
@@ -150,7 +158,9 @@ index 0000000..d860cec
 +        painter.save();
 +        painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
 +        painter.setWorldTransform(m_transform.inverted() * m_view->viewportTransform());
-+        painter.drawImage(QRectF(m_source), m_image);
++        // Preserve the image's device-pixel ratio. Stretching its rounded physical
++        // dimensions back into m_source would distort fractional-DPI captures.
++        painter.drawImage(m_origin, m_image);
 +        painter.restore();
 +        return true;
 +    }
@@ -190,6 +200,7 @@ index 0000000..d860cec
 +    QTimer m_idle;
 +    QImage m_image;
 +    QRect m_source;
++    QPointF m_origin;
 +    QSize m_size;
 +    qreal m_dpr = 1;
 +    QTransform m_transform;
@@ -367,13 +378,13 @@ index e4bb49e..2449745 100644
 --- a/src/Mod/TechDraw/Gui/QGIEdge.cpp
 +++ b/src/Mod/TechDraw/Gui/QGIEdge.cpp
 @@ -91,16 +91,12 @@ QColor QGIEdge::getHiddenColor()
- 
+
  QRectF QGIEdge::boundingRect() const
  {
 -    return shape().controlPointRect();
 +    return m_geometryCache.bounds(path(), getEdgeFuzz());
  }
- 
+
  QPainterPath QGIEdge::shape() const
  {
 -    QPainterPath outline;
@@ -383,7 +394,7 @@ index e4bb49e..2449745 100644
 -    return outline;
 +    return m_geometryCache.shape(path(), getEdgeFuzz());
  }
- 
+
  void QGIEdge::mouseDoubleClickEvent(QGraphicsSceneMouseEvent *event)
 diff --git a/src/Mod/TechDraw/Gui/QGIEdge.h b/src/Mod/TechDraw/Gui/QGIEdge.h
 index 86d60a3..68eb395 100644
@@ -391,20 +402,20 @@ index 86d60a3..68eb395 100644
 +++ b/src/Mod/TechDraw/Gui/QGIEdge.h
 @@ -27,6 +27,7 @@
  #include <Mod/TechDraw/TechDrawGlobal.h>
- 
+
  #include "QGIPrimPath.h"
 +#include "EdgeGeometryCache.h"
  #include "QGIUserTypes.h"
- 
+
  namespace TechDrawGui
 @@ -69,6 +70,8 @@ protected:
      QColor getHiddenColor();
- 
+
  private:
 +    EdgeGeometryCache m_geometryCache;
 +
      int projIndex;                                                     //index of edge in Projection. must exist.
- 
+
      bool isCosmetic;
 diff --git a/src/Mod/TechDraw/Gui/QGIFace.cpp b/src/Mod/TechDraw/Gui/QGIFace.cpp
 index 5bf55e6..ae81db9 100644
@@ -412,10 +423,10 @@ index 5bf55e6..ae81db9 100644
 +++ b/src/Mod/TechDraw/Gui/QGIFace.cpp
 @@ -21,6 +21,7 @@
   ***************************************************************************/
- 
+
  # include <cmath>
 +# include <limits>
- 
+
  # include <QFileInfo>
  # include <QGraphicsView>
 @@ -39,6 +40,11 @@
@@ -431,9 +442,9 @@ index 5bf55e6..ae81db9 100644
  #include "QGCustomImage.h"
  #include "QGICMark.h"
 @@ -64,7 +70,11 @@ QGIFace::QGIFace(int index) :
- 
+
      m_texture = QPixmap();                      //empty texture
- 
+
 +#if TECHDRAW_BATCH_SVG_HATCH
 +    m_svgHatchArea = new QGIBatchedSvgHatch();
 +#else
@@ -467,7 +478,7 @@ index 5bf55e6..ae81db9 100644
 +    }
      double tilesWide = ceil(faceOverlaySize / wTile);
      double tilesHigh = ceil(faceOverlaySize / hTile);
- 
+
 +    if (tilesWide >= std::numeric_limits<int>::max() ||
 +        tilesHigh >= std::numeric_limits<int>::max()) {
 +        Base::Console().warning("SVG hatch grid exceeds integer range\n");
@@ -542,7 +553,7 @@ index a275c82..a34e342 100644
 +        setPrettyNormal();
 +    }
  }
- 
+
  void QGIViewDimension::setViewPartFeature(TechDraw::DrawViewDimension* obj)
 @@ -2320,6 +2329,9 @@ void QGIViewDimension::setPrettyPre()
      aHead1->setPrettyPre();
@@ -552,7 +563,7 @@ index a275c82..a34e342 100644
 +    aHead2->update();
 +    dimLines->update();
  }
- 
+
  void QGIViewDimension::setPrettySel()
 @@ -2327,6 +2339,9 @@ void QGIViewDimension::setPrettySel()
      aHead1->setPrettySel();
@@ -562,7 +573,7 @@ index a275c82..a34e342 100644
 +    aHead2->update();
 +    dimLines->update();
  }
- 
+
  void QGIViewDimension::setPrettyNormal()
 @@ -2334,6 +2349,9 @@ void QGIViewDimension::setPrettyNormal()
      aHead1->setPrettyNormal();
@@ -572,7 +583,7 @@ index a275c82..a34e342 100644
 +    aHead2->update();
 +    dimLines->update();
  }
- 
+
  void QGIViewDimension::drawBorder()
 @@ -2389,10 +2407,10 @@ double QGIViewDimension::getDefaultAsmeHorizontalLeaderLength() const
  //frame, border, caption are never shown in QGIVD, so shouldn't be in bRect
@@ -595,7 +606,7 @@ index 99d0ccd..4cac942 100644
 +++ b/src/Mod/TechDraw/Gui/QGVNavStyle.cpp
 @@ -297,6 +297,8 @@ void QGVNavStyle::zoom(double factor)
      }
- 
+
      setAnchor();
 +    if (factor != 1.0)
 +        getViewer()->beginNavigationPreview();
@@ -603,7 +614,7 @@ index 99d0ccd..4cac942 100644
      m_zoomPending = false;
  }
 @@ -357,6 +359,8 @@ void QGVNavStyle::startPan(QPoint p)
- 
+
  void QGVNavStyle::pan(QPoint p)
  {
 +    if (p != panOrigin)
@@ -617,7 +628,7 @@ index 7188fd7..5c9a548 100644
 +++ b/src/Mod/TechDraw/Gui/QGVPage.cpp
 @@ -47,6 +47,7 @@
  #include <Mod/TechDraw/App/DrawSVGTemplate.h>
- 
+
  #include "MDIViewPage.h"
 +#include "NavigationPreview.h"
  #include "PreferencesGui.h"
@@ -625,14 +636,14 @@ index 7188fd7..5c9a548 100644
  #include "QGVNavStyleBlender.h"
 @@ -145,6 +146,7 @@ QGVPage::QGVPage(ViewProviderPage* vpPage, QGSPage* scenePage, QWidget* parent)
      setObjectName(QString::fromLocal8Bit(name));
- 
+
      setScene(scenePage);
 +    m_navigationPreview = std::make_unique<NavigationPreview>(this);
      setMouseTracking(true);
      viewport()->setMouseTracking(true);
- 
+
 @@ -257,6 +259,7 @@ void QGVPage::setNavigationStyle(std::string navParm)
- 
+
  void QGVPage::activateHandler(TechDrawHandler* newHandler)
  {
 +    m_navigationPreview->invalidate();
@@ -640,7 +651,7 @@ index 7188fd7..5c9a548 100644
          toolHandler->deactivate();
      }
 @@ -275,6 +278,7 @@ void QGVPage::deactivateHandler()
- 
+
  void QGVPage::startBalloonPlacing(DrawView* parent)
  {
 +    m_navigationPreview->invalidate();
@@ -650,7 +661,7 @@ index 7188fd7..5c9a548 100644
 @@ -289,7 +293,7 @@ void QGVPage::cancelBalloonPlacing()
      resetCursor();
  }
- 
+
 -void QGVPage::drawBackground(QPainter* painter, const QRectF&)
 +void QGVPage::drawBackground(QPainter* painter, const QRectF& rect)
  {
@@ -659,7 +670,7 @@ index 7188fd7..5c9a548 100644
 @@ -303,18 +307,14 @@ void QGVPage::drawBackground(QPainter* painter, const QRectF&)
          return;
      }
- 
+
 -    painter->save();
 -    painter->resetTransform();
 -
@@ -672,12 +683,12 @@ index 7188fd7..5c9a548 100644
 +    // render target. Resetting to viewport coordinates draws borders into that target.
 +    painter->fillRect(rect, *bkgBrush);
  }
- 
+
  void QGVPage::setRenderer(RendererType type)
  {
 +    m_navigationPreview->invalidate();
      m_renderer = type;
- 
+
      if (m_renderer == RendererType::OpenGL) {
 @@ -325,7 +325,10 @@ void QGVPage::setRenderer(RendererType type)
      }
@@ -690,9 +701,9 @@ index 7188fd7..5c9a548 100644
 +                                      : QGraphicsView::FullViewportUpdate);
      }
  }
- 
+
 @@ -340,6 +343,11 @@ void QGVPage::setHighQualityAntialiasing(bool highQualityAntialiasing)
- 
+
  void QGVPage::paintEvent(QPaintEvent* event)
  {
 +    if (m_renderer == RendererType::Native && m_navigationPreview->active()) {
@@ -706,7 +717,7 @@ index 7188fd7..5c9a548 100644
 @@ -381,6 +389,14 @@ void QGVPage::pseudoContextEvent()
      }
  }
- 
+
 +void QGVPage::beginNavigationPreview()
 +{
 +    if (m_renderer == RendererType::Native && !toolHandler && !balloonPlacing &&
@@ -719,14 +730,14 @@ index 7188fd7..5c9a548 100644
  {
      m_navStyle->handleWheelEvent(event);
 @@ -415,12 +431,14 @@ void QGVPage::keyReleaseEvent(QKeyEvent* event)
- 
+
  void QGVPage::focusOutEvent(QFocusEvent* event)
  {
 +    m_navigationPreview->invalidate();
      Q_UNUSED(event);
      m_navStyle->handleFocusOutEvent(event);
  }
- 
+
  void QGVPage::kbPanScroll(int xMove, int yMove)
  {
 +    beginNavigationPreview();
@@ -734,7 +745,7 @@ index 7188fd7..5c9a548 100644
          QScrollBar* hsb = horizontalScrollBar();
          //        int hRange = hsb->maximum() - hsb->minimum();     //default here is 100?
 @@ -461,6 +479,7 @@ void QGVPage::leaveEvent(QEvent* event)
- 
+
  void QGVPage::mousePressEvent(QMouseEvent* event)
  {
 +    m_navigationPreview->invalidate();
@@ -744,7 +755,7 @@ index 7188fd7..5c9a548 100644
 @@ -557,6 +576,12 @@ void QGVPage::zoomOut()
      m_navStyle->zoomOut();
  }
- 
+
 +void QGVPage::showGrid(bool state)
 +{
 +    m_navigationPreview->invalidate();
@@ -755,7 +766,7 @@ index 7188fd7..5c9a548 100644
  {
      Q_UNUSED(rect);
 @@ -571,6 +596,7 @@ void QGVPage::drawForeground(QPainter* painter, const QRectF& rect)
- 
+
  void QGVPage::makeGrid(int gridWidth, int gridHeight, double gridStep)
  {
 +    m_navigationPreview->invalidate();
@@ -767,7 +778,7 @@ index aaa9d14..0ea422a 100644
 --- a/src/Mod/TechDraw/Gui/QGVPage.h
 +++ b/src/Mod/TechDraw/Gui/QGVPage.h
 @@ -60,6 +60,7 @@ class DrawWeldSymbol;
- 
+
  namespace TechDrawGui
  {
 +class NavigationPreview;
@@ -776,26 +787,26 @@ index aaa9d14..0ea422a 100644
  class QGIView;
 @@ -99,7 +100,7 @@ public:
      TechDraw::DrawPage* getDrawPage();
- 
+
      void makeGrid(int width, int height, double step);
 -    void showGrid(bool state) { m_showGrid = state; }
 +    void showGrid(bool state);
      void updateViewport() { viewport()->repaint(); }
- 
+
      void activateHandler(TechDrawHandler* newHandler);
 @@ -127,6 +128,7 @@ public:
- 
+
      TechDraw::DrawView* getBalloonParent() { return m_balloonParent; }
- 
+
 +    void beginNavigationPreview();
      void zoomIn();
      void zoomOut();
- 
+
 @@ -166,6 +168,7 @@ protected:
- 
+
  private:
      RendererType m_renderer;
 +    std::unique_ptr<NavigationPreview> m_navigationPreview;
- 
+
      bool drawBkg;
      QBrush* bkgBrush;

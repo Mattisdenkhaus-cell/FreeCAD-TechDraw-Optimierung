@@ -88,7 +88,7 @@ def main():
             environment['ASAN_OPTIONS'] = 'detect_leaks=0'
         for batch_mode in ((1,) if args.navigation_only else (1, 0)):
             subprocess.run(command + [f'-DTECHDRAW_BATCH_SVG_HATCH={batch_mode}'], check=True)
-            for scale in (('1', '1.25', '2') if args.navigation_only else ('1',)):
+            for scale in (('1', '1.25', '1.5', '2') if args.navigation_only else ('1',)):
                 environment['QT_SCALE_FACTOR'] = scale
                 subprocess.run([str(executable)], env=environment, check=True)
 

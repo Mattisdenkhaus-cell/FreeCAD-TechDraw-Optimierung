@@ -12,6 +12,7 @@
 #include <QScrollBar>
 #include <QSvgGenerator>
 #include <iostream>
+#include <algorithm>
 #include <stdexcept>
 #include "NavigationPreview.h"
 
@@ -35,7 +36,9 @@ struct Preferences {
 class QGVPage : public QGraphicsView {
 public:
     enum class RendererType { Native, OpenGL, Image };
-    explicit QGVPage(QGraphicsScene* scene) : QGraphicsView(scene), m_navigationPreview(std::make_unique<NavigationPreview>(this)) {}
+    explicit QGVPage(QGraphicsScene* scene) : QGraphicsView(scene), m_navigationPreview(std::make_unique<NavigationPreview>(this)) {
+        setCacheMode(QGraphicsView::CacheBackground);
+    }
     void paintEvent(QPaintEvent*) override;
     void setRenderer(RendererType);
     void beginNavigationPreview();
@@ -188,6 +191,8 @@ void navigationChecks()
         for (const QColor& color : {QColor(Qt::white), QColor(Qt::gray), QColor(42, 96, 135), QColor(112, 112, 112, 0), QColor(80, 90, 100, 128)}) {
             updated.background.setColor(color);
             original.background.setColor(color);
+            updated.resetCachedContent();
+            original.resetCachedContent();
             for (double scale : {0.6, 1.0, 1.25, 2.0}) {
                 updated.setTransform(QTransform().rotate(7).scale(scale, scale));
                 original.setTransform(updated.transform());
@@ -225,13 +230,14 @@ void navigationChecks()
     view.setRenderHint(QPainter::Antialiasing);
     view.setBackgroundBrush(Qt::white);
     view.setViewportUpdateMode(QGraphicsView::FullViewportUpdate);
-    view.resize(640, 480);
+    view.resize(639, 479);
     view.show();
     view.centerOn(250, 180);
     flush();
     auto& cache = *view.m_navigationPreview;
     for (const QColor& color : {QColor(112, 112, 112, 0), QColor(80, 90, 100, 128)}) {
         view.background.setColor(color);
+        view.resetCachedContent();
         view.viewport()->update();
         flush();
         const auto reference = screen(view);
@@ -249,6 +255,7 @@ void navigationChecks()
         cache.invalidate();
     }
     view.background.setColor(Qt::white);
+    view.resetCachedContent();
     view.viewport()->update();
     flush();
     const auto originalShape = target->shape();
@@ -286,21 +293,32 @@ void navigationChecks()
     timer.start();
     for (int i = 0; i < 20; ++i) {
         CHECK(cache.begin());
+        const auto beforePaint = CountedPath::paints;
         view.setTransform(QTransform::fromScale(i % 2 ? 1.04 : 1.02, i % 2 ? 1.04 : 1.02));
         screen(view);
+        CHECK(CountedPath::paints == beforePaint);
+        // A slow/instrumented event loop may legitimately exceed the 120 ms idle
+        // deadline and perform an exact paint here. Count it, do not suppress it.
+        flush();
     }
     const auto previewNs = timer.nsecsElapsed();
-    CHECK(CountedPath::paints == 0);
+    const auto previewExtraPaints = CountedPath::paints;
     cache.invalidate();
+    timer.restart();
+    screen(view);
+    flush();
+    const auto finalFrameNs = timer.nsecsElapsed();
+    CountedPath::paints = 0;
     timer.restart();
     for (int i = 0; i < 20; ++i) {
         view.setTransform(QTransform::fromScale(i % 2 ? 1.04 : 1.02, i % 2 ? 1.04 : 1.02));
         screen(view);
+        flush();
     }
     const auto exactNs = timer.nsecsElapsed();
     CHECK(CountedPath::paints > 0);
     std::cout << "MICROBENCH navigation 2000 paths, 20 zoom steps: exact_ns=" << exactNs
-              << " initial_capture_ns=" << captureNs << " preview_ns=" << previewNs << " vector_paints=" << CountedPath::paints << '\n';
+              << " initial_capture_ns=" << captureNs << " preview_ns=" << previewNs << " final_exact_ns=" << finalFrameNs << " preview_extra_paints=" << previewExtraPaints << " vector_paints=" << CountedPath::paints << '\n';
 
     const auto exact = screen(view);
     CHECK(cache.begin());

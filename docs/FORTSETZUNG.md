@@ -33,7 +33,8 @@ Abgeschlossene Schritte sind in getrennten Git-Commits gesichert.
 - Portable Ausgabe separat entpacken, mit getrennten Einstellungsdateien starten,
   Funktions-/Exportcheckliste aus `benchmarks/README.md` abarbeiten.
   Das neue eigenständige `benchmarks/TechDrawTest.FCMacro` ermöglicht einen ersten
-  Messlauf mit Seitenauswahl und JSON-Speicherung ohne Konfigurationsdatei.
+  Messlauf mit reiner Seitenauswahl: automatische temporäre Dokumentkopie,
+  JSON-Speicherung unter `Dokumente/TechDrawTests`, kein manuelles Kopieren nötig.
 - Große reale Zeichnungen mit und ohne SVG-Schraffuren messen; erst dann Aussagen
   über die Verbesserung der tatsächlichen Bearbeitungsperformance treffen.
 

@@ -3,18 +3,30 @@
 ## Einfacher Start mit einer einzigen Datei
 
 [`TechDrawTest.FCMacro`](TechDrawTest.FCMacro) herunterladen und in FreeCAD über
-**Makro → Makros… → Ausführen** starten. Vorher eine gespeicherte, unveränderte
-Testkopie einer Zeichnung öffnen und die Berechnung abwarten. Das Makro fragt nach
-Seite, Versionskennzeichnung (Original/Optimiert) und Speicherort der JSON-Ergebnisse.
-Es benötigt keine weiteren Dateien und keine Umgebungsvariablen.
+**Makro → Makros… → Ausführen** starten. Deine Zeichnung öffnen, Berechnung abwarten
+und im Makro **nur das Zeichnungsblatt auswählen**. Eine manuelle Kopie ist nicht nötig.
 
-Pro Aktion werden drei Aufwärmschritte und zehn Messschritte ausgeführt. Währenddessen
-nicht eingreifen. Am Ende erscheinen Median und p95 in Millisekunden; fehlende
-Bemaßung oder fehlender Scrollbereich werden als unvollständige Messung angezeigt.
-Die Zeichnungsdatei wird nicht gespeichert. Die Versionskennzeichnung wird vom
-Benutzer gewählt; das Makro erkennt den eingebauten Optimierungspatch nicht selbst.
-Für einen Vergleich beide JSON-Dateien aufbewahren und unter gleichen Bedingungen
-messen. Die unten genannten Grenzen und manuellen Funktionsprüfungen gelten ebenfalls.
+Das Makro öffnet eine automatische temporäre Dokumentkopie und misst ausschließlich
+in dieser. Ungespeicherte Änderungen werden mit `saveCopy()` übernommen, ohne die
+Originaldatei zu überschreiben oder das Originaldokument umzubenennen. Nach dem Test
+wird die Kopie geschlossen und das Original wieder aktiviert. Ein Fortschrittsfenster
+bietet Abbruch zwischen den einzelnen Messschritten; eine laufende FreeCAD-Berechnung
+lässt sich damit nicht sofort unterbrechen.
+
+Pro Aktion werden drei Aufwärmschritte und zehn Messschritte ausgeführt. Am Ende
+erscheinen Median und p95 in Millisekunden. Die JSON-Datei landet automatisch unter
+**Dokumente/TechDrawTests**, mit eindeutigem Dateinamen; der genaue Pfad erscheint im
+Ergebnisdialog. Falls kein Dokumente-Ordner ermittelt werden kann, wird der
+FreeCAD-Benutzerdatenordner verwendet. Fehlende Bemaßung oder fehlender Scrollbereich
+werden als unvollständige Messung angezeigt.
+
+Für vergleichbare Läufe dieselbe **gespeicherte, unveränderte Zeichnung** in beiden
+Versionen öffnen. Dann wird die Datei bytegleich kopiert und ihr SHA256 bleibt
+vergleichbar. Momentaufnahmen mit ungespeicherten Änderungen sind für Einzeltests
+geeignet; ihre Datei-Hashes können sich zwischen Läufen unterscheiden. Das Makro
+ermittelt die FreeCAD-Version und den Installationspfad, erkennt aber den eingebauten
+Optimierungspatch nicht automatisch. Notiere deshalb, welche JSON-Datei aus welcher
+Installation stammt. Die unten genannten Messgrenzen gelten ebenfalls.
 
 Die Einzeldatei wird mit `python3 scripts/package_test_macro.py` aus dem bestehenden
 Benchmark und `interactive_test.py` erzeugt; Änderungen an diesen Quellen anschließend

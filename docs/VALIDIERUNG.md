@@ -91,10 +91,23 @@ Das Makro war zuvor mit dem vorhandenen Linux-FreeCAD 1.0.0 erfolgreich erprobt.
 
 ## Eigenständiges Testmakro
 
-`benchmarks/TechDrawTest.FCMacro` bündelt den unveränderten Benchmark mit einem
-Dialogstart für Seitenauswahl, Versionskennzeichnung und JSON-Ausgabe. Die erzeugte
-Einzeldatei wurde in der vorhandenen Linux-Version 1.0.0 offscreen ausgeführt,
-mit automatisierten Dialogantworten: alle fünf Messgruppen mit je zehn Messwerten,
-Ergebnisdialog und JSON-Ausgabe erfolgreich, kein Mess- oder Wiederherstellungsfehler.
-Die sieben bestehenden Python-Tests bestanden ebenfalls. Dies bestätigt den Ablauf,
-nicht die Windows-Dialogdarstellung oder Performance der optimierten Version.
+`benchmarks/TechDrawTest.FCMacro` bündelt den Benchmark mit automatischer temporärer
+Dokumentkopie. Der Benutzer wählt nur das Blatt aus; Ergebnisse werden automatisch
+unter `Dokumente/TechDrawTests` gespeichert. Nach dem Laden wartet das Makro auf die
+projizierte Geometrie und aktiviert ausdrücklich das Blatt der Kopie. Die Kopie
+benötigt keine Undo-Transaktion: Ihre Änderungen werden beim Schließen verworfen,
+wodurch der dokumentübergreifende Undo-Verlauf des Originals erhalten bleibt.
+
+`tests/freecad_copy_smoke.FCMacro` prüft in einem separaten FreeCAD-Prozess drei Fälle:
+gespeicherte Zeichnung, ungespeicherte Maßänderung und Abbruch. In der vorhandenen
+Linux-Version 1.0.0 offscreen bestanden: beide vollständigen Läufe mit fünf Messgruppen
+und je zehn Werten; Abbruch korrekt als Fehler markiert. Original-Dateihash, Dateiname,
+Modified-Status, Undo-Zähler, Objektzustände, Maßposition und Auswahl blieben erhalten.
+Die temporäre Kopie wurde geschlossen und das Original wieder aktiviert. Die
+Testergebnisse stehen im vom Test ausgegebenen temporären Ordner (`verified.json`
+bei Erfolg, `error.txt` bei Fehler); Dialogantworten sind automatisiert.
+
+Dies bestätigt den Ablauf an einem kleinen TechDraw-Testdokument, nicht die
+Windows-Dialogdarstellung, beliebige externe Dokumentverknüpfungen oder die
+Performance der optimierten Version. Die sieben bestehenden Python-Tests bestanden
+weiterhin. Kein Windows-Vollbuild für die Makroänderung erforderlich.

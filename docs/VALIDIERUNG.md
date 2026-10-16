@@ -88,3 +88,13 @@ Die Prüfung verwendet Qt offscreen. Sie bestätigt den portablen Programmstart 
 die genannten Funktionen an einem kleinen erzeugten Testdokument, aber keine
 GPU-/Displayqualität, visuelle Exportgleichheit oder Beschleunigung realer Zeichnungen.
 Das Makro war zuvor mit dem vorhandenen Linux-FreeCAD 1.0.0 erfolgreich erprobt.
+
+## Eigenständiges Testmakro
+
+`benchmarks/TechDrawTest.FCMacro` bündelt den unveränderten Benchmark mit einem
+Dialogstart für Seitenauswahl, Versionskennzeichnung und JSON-Ausgabe. Die erzeugte
+Einzeldatei wurde in der vorhandenen Linux-Version 1.0.0 offscreen ausgeführt,
+mit automatisierten Dialogantworten: alle fünf Messgruppen mit je zehn Messwerten,
+Ergebnisdialog und JSON-Ausgabe erfolgreich, kein Mess- oder Wiederherstellungsfehler.
+Die sieben bestehenden Python-Tests bestanden ebenfalls. Dies bestätigt den Ablauf,
+nicht die Windows-Dialogdarstellung oder Performance der optimierten Version.

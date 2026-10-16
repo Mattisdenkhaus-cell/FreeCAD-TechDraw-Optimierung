@@ -83,5 +83,9 @@ ist mit allen fünf Prüfgruppen bestanden (Qt offscreen; Details unter Validier
    Schraffuren und Exporte prüfen. Für vergleichbare Messungen die
    [Benchmark-Anleitung](benchmarks/README.md) verwenden.
 
+Für den einfachen Einstieg gibt es das eigenständige
+[Testmakro TechDrawTest.FCMacro](benchmarks/TechDrawTest.FCMacro): eine Datei,
+Seitenauswahl und Ergebnisspeicherung per Dialog, ohne Zusatzinstallation.
+
 [Quellcodeanalyse](docs/ANALYSE.md) · [Technische Entscheidungen](docs/TECHNIK.md) ·
 [Benchmark-Anleitung](benchmarks/README.md) · [Fortsetzungsstand](docs/FORTSETZUNG.md)

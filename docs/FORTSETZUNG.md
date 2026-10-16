@@ -32,6 +32,8 @@ Abgeschlossene Schritte sind in getrennten Git-Commits gesichert.
   nicht freigegeben. Historischer Workflow und SVG-Patch sind unverändert.
 - Portable Ausgabe separat entpacken, mit getrennten Einstellungsdateien starten,
   Funktions-/Exportcheckliste aus `benchmarks/README.md` abarbeiten.
+  Das neue eigenständige `benchmarks/TechDrawTest.FCMacro` ermöglicht einen ersten
+  Messlauf mit Seitenauswahl und JSON-Speicherung ohne Konfigurationsdatei.
 - Große reale Zeichnungen mit und ohne SVG-Schraffuren messen; erst dann Aussagen
   über die Verbesserung der tatsächlichen Bearbeitungsperformance treffen.
 

@@ -1,5 +1,27 @@
 # Vergleichbare GUI-Schritte messen
 
+## Einfacher Start mit einer einzigen Datei
+
+[`TechDrawTest.FCMacro`](TechDrawTest.FCMacro) herunterladen und in FreeCAD über
+**Makro → Makros… → Ausführen** starten. Vorher eine gespeicherte, unveränderte
+Testkopie einer Zeichnung öffnen und die Berechnung abwarten. Das Makro fragt nach
+Seite, Versionskennzeichnung (Original/Optimiert) und Speicherort der JSON-Ergebnisse.
+Es benötigt keine weiteren Dateien und keine Umgebungsvariablen.
+
+Pro Aktion werden drei Aufwärmschritte und zehn Messschritte ausgeführt. Währenddessen
+nicht eingreifen. Am Ende erscheinen Median und p95 in Millisekunden; fehlende
+Bemaßung oder fehlender Scrollbereich werden als unvollständige Messung angezeigt.
+Die Zeichnungsdatei wird nicht gespeichert. Die Versionskennzeichnung wird vom
+Benutzer gewählt; das Makro erkennt den eingebauten Optimierungspatch nicht selbst.
+Für einen Vergleich beide JSON-Dateien aufbewahren und unter gleichen Bedingungen
+messen. Die unten genannten Grenzen und manuellen Funktionsprüfungen gelten ebenfalls.
+
+Die Einzeldatei wird mit `python3 scripts/package_test_macro.py` aus dem bestehenden
+Benchmark und `interactive_test.py` erzeugt; Änderungen an diesen Quellen anschließend
+neu bündeln.
+
+## Konfigurierbare Variante
+
 `TechDrawBench.FCMacro` läuft innerhalb von FreeCAD. Das Werkzeug greift nur auf
 Dokumentobjekte, Auswahl-API und Qt-**Widgets** zu. Es ruft weder `scene()` noch
 `items()` auf und verändert keine Qt-Grafikobjekt-Besitzstruktur.

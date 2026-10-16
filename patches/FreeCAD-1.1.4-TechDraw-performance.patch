@@ -57,10 +57,10 @@ index 0000000..eab58d7
 +#endif
 diff --git a/src/Mod/TechDraw/Gui/NavigationPreview.h b/src/Mod/TechDraw/Gui/NavigationPreview.h
 new file mode 100644
-index 0000000..418f05a
+index 0000000..a2f749f
 --- /dev/null
 +++ b/src/Mod/TechDraw/Gui/NavigationPreview.h
-@@ -0,0 +1,149 @@
+@@ -0,0 +1,155 @@
 +// SPDX-License-Identifier: LGPL-2.1-or-later
 +#ifndef TECHDRAWGUI_NAVIGATIONPREVIEW_H
 +#define TECHDRAWGUI_NAVIGATIONPREVIEW_H
@@ -129,11 +129,16 @@ index 0000000..418f05a
 +            if (pixels.width() > 32768 || pixels.height() > 32768 ||
 +                qint64(pixels.width()) * pixels.height() * 4 > maxBytes)
 +                return false;
-+            m_image = QImage(pixels, QImage::Format_ARGB32_Premultiplied);
++            m_image = QImage(pixels, QImage::Format_RGB32);
 +            if (m_image.isNull())
 +                return false;
 +            m_image.setDevicePixelRatio(m_dpr);
-+            m_image.fill(Qt::transparent);
++            m_logicalDpi = QSize(m_view->viewport()->logicalDpiX(), m_view->viewport()->logicalDpiY());
++            m_image.setDotsPerMeterX(qRound(m_logicalDpi.width() / 0.0254));
++            m_image.setDotsPerMeterY(qRound(m_logicalDpi.height() / 0.0254));
++            // The widget backing store is opaque. RGB32 also preserves Qt's
++            // opaque-target text rasterization (ARGB can disable subpixel antialiasing).
++            m_image.fill(base.color());
 +            m_transform = m_view->viewportTransform();
 +            m_hints = m_view->renderHints();
 +            m_baseBrush = base;
@@ -142,7 +147,6 @@ index 0000000..418f05a
 +            // Match QWidget's erased backing store before the (possibly transparent)
 +            // TechDraw background is painted. Never composite it twice over itself.
 +            const QRectF target(QPointF(m_source.topLeft()) - m_origin, QSizeF(m_source.size()));
-+            painter.fillRect(QRectF(QPointF(), QSizeF(pixels) / m_dpr), m_baseBrush);
 +            m_view->render(&painter, target, m_source, Qt::IgnoreAspectRatio);
 +        }
 +        m_idle.start();
@@ -183,6 +187,7 @@ index 0000000..418f05a
 +    {
 +        if (m_image.isNull() || !m_scene || m_view->scene() != m_scene ||
 +            m_size != m_view->viewport()->size() ||
++            m_logicalDpi != QSize(m_view->viewport()->logicalDpiX(), m_view->viewport()->logicalDpiY()) ||
 +            m_dpr != m_view->viewport()->devicePixelRatioF() || m_hints != m_view->renderHints() ||
 +            !m_view->viewport()->autoFillBackground() ||
 +            m_baseBrush != m_view->viewport()->palette().brush(m_view->viewport()->backgroundRole()))
@@ -202,6 +207,7 @@ index 0000000..418f05a
 +    QRect m_source;
 +    QPointF m_origin;
 +    QSize m_size;
++    QSize m_logicalDpi;
 +    qreal m_dpr = 1;
 +    QTransform m_transform;
 +    QPainter::RenderHints m_hints;

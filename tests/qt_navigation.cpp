@@ -244,16 +244,20 @@ void navigationChecks()
         CHECK(cache.begin());
         const auto preview = screen(view);
         CHECK(reference.size() == preview.size());
-        int alphaError = 0;
+        int alphaError = 0, outsideTextError = 0;
+        const QRectF labelPixels = view.mapFromScene(text->sceneBoundingRect()).boundingRect();
         for (int y = 0; y < reference.height(); ++y) {
             for (int x = 0; x < reference.width(); ++x) {
                 const QColor a = reference.pixelColor(x, y), b = preview.pixelColor(x, y);
-                alphaError = std::max({alphaError, std::abs(a.red() - b.red()),
-                                       std::abs(a.green() - b.green()), std::abs(a.blue() - b.blue())});
+                const int error = std::max({std::abs(a.red() - b.red()),
+                                            std::abs(a.green() - b.green()), std::abs(a.blue() - b.blue())});
+                alphaError = std::max(alphaError, error);
+                if (!labelPixels.adjusted(-2, -2, 2, 2).contains(QPointF(x, y) / view.devicePixelRatioF()))
+                    outsideTextError = std::max(outsideTextError, error);
             }
         }
         std::cout << "ALPHA dpr=" << view.devicePixelRatioF() << " alpha=" << color.alpha()
-                  << " max_error=" << alphaError << '\n';
+                  << " max_error=" << alphaError << " outside_text_error=" << outsideTextError << " logical_dpi=" << view.viewport()->logicalDpiX() << '\n';
         if (alphaError > 4) {
             reference.save("/tmp/techdraw-alpha-reference.png");
             preview.save("/tmp/techdraw-alpha-preview.png");

@@ -16,22 +16,20 @@ Abgeschlossene Schritte sind in getrennten Git-Commits gesichert.
    Die Patch-Übertragung wird jetzt auf LF normalisiert; strikte Whitespace-Prüfung
    bleibt aktiv. Zwei zusätzliche Regressionstests prüfen diesen Windows-Fall.
    Der korrigierte Lauf [38748155482](https://github.com/Mattisdenkhaus-cell/FreeCAD-TechDraw-Optimierung/actions/runs/38748155482)
-   baut Commit `1b46341cb5e7ccef49ddba2030aa61f96886c9fb`. Patchanwendung unter
-   Windows bestanden; bei dieser Aufzeichnung läuft die LibPack-/Build-Vorbereitung.
+   hat Commit `1b46341cb5e7ccef49ddba2030aa61f96886c9fb` erfolgreich kompiliert,
+   installiert und als vollständiges portables Windows-Archiv veröffentlicht.
+   Artefakt-ID: `11994042499`, rund 642 MB, Ablauf am 22. Oktober 2026 um 17:27 UTC.
+   Download und Startanleitung stehen im README.
 
 ## Nächste Freigabestufe
 
-- Pull Request prüfen; schnelle Linux-CI auswerten, sofern GitHub-API/Push verfügbar.
-- Lauf `38748155482` prüfen; keinen doppelten Vollbuild starten.
-  Lauf `38747230182` ist bereits vor der Kompilierung fehlgeschlagen.
-- Nach erfolgreichem Build den kurzen Modus `validate-artifact` mit
-  `artifact_run=38748155482` auf dem Entwicklungsbranch starten. Dieser prüft
-  das entpackte Archiv mit isolierter Konfiguration und erzeugt ein eigenes
-  Ergebnisartefakt; er kompiliert FreeCAD nicht erneut.
-  Nach Abschluss Logs und portables Artefakt prüfen, insbesondere echten Programmstart,
-  TechDraw-Module und Ressourcen. Bei einem Fehler zunächst die Ursache isolieren.
-  Ein separater `upstream`-Vergleichsbuild wurde noch nicht freigegeben.
-  Historischer Workflow und SVG-Patch stehen weiterhin unverändert zur Verfügung.
+- Windows-Vollbuild `38748155482` und anschließender kurzer Start-/Exporttest
+  [38862598647](https://github.com/Mattisdenkhaus-cell/FreeCAD-TechDraw-Optimierung/actions/runs/38862598647)
+  sind erfolgreich abgeschlossen. Alle fünf Prüfgruppen bestanden; kein erneuter
+  Vollbuild nötig. Ergebnis dauerhaft unter `docs/validation/` gesichert.
+- Der PR bleibt bis zu realen Zeichnungsbenchmarks und manuellen Interaktions-/
+  Sichtprüfungen ein Entwurf. Ein separater `upstream`-Vergleichsbuild wurde noch
+  nicht freigegeben. Historischer Workflow und SVG-Patch sind unverändert.
 - Portable Ausgabe separat entpacken, mit getrennten Einstellungsdateien starten,
   Funktions-/Exportcheckliste aus `benchmarks/README.md` abarbeiten.
 - Große reale Zeichnungen mit und ohne SVG-Schraffuren messen; erst dann Aussagen

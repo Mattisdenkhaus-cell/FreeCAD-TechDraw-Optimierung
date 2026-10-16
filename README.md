@@ -3,7 +3,8 @@
 Entwicklungsstand für flüssigere Bearbeitung bereits berechneter Zeichnungen.
 Die Änderungen liegen als **gemeinsamer C++-Patch** für den verifizierten
 FreeCAD-Commit `4fd3bf320d9566a27e60069fc8387448aaa3a094` vor.
-Eine neue portable Windows-Version wurde noch nicht gebaut oder freigegeben.
+Die optimierte portable Windows-Version wurde erfolgreich gebaut. Reale
+Zeichnungsvergleiche und manuelle Funktionsprüfungen stehen vor einer Freigabe noch aus.
 
 - Auswahlumrisse und Begrenzungsrechtecke von Kanten wiederverwenden.
 - Temporäre Polygone bei Rechtecktransformationen vermeiden.
@@ -58,6 +59,29 @@ Varianten: `upstream`, `optimized`, `optimized-unbatched`. Die letzte Variante n
 Das Archiv separat entpacken und `bin/FreeCAD.exe` starten. Für unabhängige Einstellungen
 mit `--user-cfg <separate-Datei>` und `--system-cfg <separate-Datei>` starten und
 Testkopien der Zeichnungen verwenden; es wird kein Installer erstellt.
+
+## Portable Testversion herunterladen
+
+Der erfolgreiche [Windows-Build 38748155482](https://github.com/Mattisdenkhaus-cell/FreeCAD-TechDraw-Optimierung/actions/runs/38748155482)
+enthält das [vollständige Windows-Paket](https://github.com/Mattisdenkhaus-cell/FreeCAD-TechDraw-Optimierung/actions/runs/38748155482/artifacts/11994042499)
+als Artefakt `FreeCAD-1.1.4-TechDraw-optimized-Windows-COMPLETE` (rund 642 MB).
+Die Aufbewahrung endet laut GitHub am **22. Oktober 2026 um 17:27 UTC**.
+Gebaut wurde Commit `1b46341cb5e7ccef49ddba2030aa61f96886c9fb`. Der anschließende
+[Windows-Start-/Exporttest](https://github.com/Mattisdenkhaus-cell/FreeCAD-TechDraw-Optimierung/actions/runs/38862598647)
+ist mit allen fünf Prüfgruppen bestanden (Qt offscreen; Details unter Validierung).
+
+1. Bei GitHub anmelden und das Artefakt herunterladen.
+2. Die heruntergeladene ZIP-Datei und anschließend das enthaltene `.7z`-Archiv
+   mit 7-Zip in einen eigenen Ordner entpacken.
+3. PowerShell in diesem entpackten Ordner öffnen und mit eigenen Einstellungen starten:
+
+   ```powershell
+   & .\bin\FreeCAD.exe --user-cfg "$PWD\techdraw-user.cfg" --system-cfg "$PWD\techdraw-system.cfg"
+   ```
+
+4. Eine **Kopie** einer Zeichnung öffnen und Auswahl, Maßtextbewegung, Zoom,
+   Schraffuren und Exporte prüfen. Für vergleichbare Messungen die
+   [Benchmark-Anleitung](benchmarks/README.md) verwenden.
 
 [Quellcodeanalyse](docs/ANALYSE.md) · [Technische Entscheidungen](docs/TECHNIK.md) ·
 [Benchmark-Anleitung](benchmarks/README.md) · [Fortsetzungsstand](docs/FORTSETZUNG.md)

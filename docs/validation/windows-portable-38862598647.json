@@ -1,0 +1,29 @@
+{
+  "build_run": 38748155482,
+  "build_commit": "1b46341cb5e7ccef49ddba2030aa61f96886c9fb",
+  "archive_artifact": 11994042499,
+  "validation_run": 38862598647,
+  "validation_commit": "617f112c555c32290f15b5643ac2f1222b6d1188",
+  "platform": "windows-2022",
+  "qt_platform": "offscreen",
+  "result": {
+    "status": "passed",
+    "freecad": [
+      "1",
+      "1",
+      "4",
+      "20260928 (Git shallow)",
+      "Unknown",
+      "2026/09/28 13:46:34",
+      "HEAD",
+      "4fd3bf320d9566a27e60069fc8387448aaa3a094"
+    ],
+    "checks": [
+      "FreeCAD version and Part/TechDraw/TechDrawGui imports",
+      "Projected box, dimension and SVG hatch created and displayed",
+      "Edge selection and dimension property move",
+      "PDF/SVG/DXF export files produced (visual equivalence not asserted)",
+      "Saved FCStd reopened with projected geometry"
+    ]
+  }
+}

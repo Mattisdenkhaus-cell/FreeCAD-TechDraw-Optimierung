@@ -1,4 +1,4 @@
-# Validierungsstand – 15. Oktober 2026
+# Validierungsstand – 16. Oktober 2026
 
 Basis FreeCAD 1.1.4: `4fd3bf320d9566a27e60069fc8387448aaa3a094`.
 Lokale Umgebung: Debian 13, Qt 5.15.15, g++, Raster-Offscreen-Qt-Tests.
@@ -47,21 +47,26 @@ APIs. Wegen anderer FreeCAD-Version und Offscreen-/OpenGL-Warnungen gelten diese
 Werte ausdrücklich **nicht** als Rendering- oder Performance-Nachweis für 1.1.4.
 Es wurden keine solchen Messwerte als Optimierungsergebnis übernommen.
 
+## Windows-Vollbuild
+
+[Lauf 38748155482](https://github.com/Mattisdenkhaus-cell/FreeCAD-TechDraw-Optimierung/actions/runs/38748155482)
+ist erfolgreich abgeschlossen: vollständige Kompilierung und Linken, CMake-Installation,
+Modul-/Ressourcenprüfung und Verpackung der optimierten Variante. Gebauter Commit:
+`1b46341cb5e7ccef49ddba2030aa61f96886c9fb`. Das vollständige Windows-Artefakt
+`11994042499` ist rund 642 MB groß.
+
 ## Noch offen
 
-- Vollständige Kompilierung/Linken von FreeCAD 1.1.4 unter Windows, Start und portable
-  Verpackung der optimierten Variante. Der korrigierte Windows-Lauf `38748155482`
-  ist gestartet; sein Endergebnis bleibt abzuwarten.
 - Original-vs-optimiert-Messungen mit großen realen Zeichnungen auf Zielhardware.
 - Mausauswahl, Erstellen/Ziehen/Snapping von Bemaßungen, Schnitt-/Detailansichten,
-  Dokument-Wiederöffnung und visuelle Export-/Druckvergleiche (PDF/SVG/DXF).
+  Wiederöffnung realer Zeichnungen und visuelle Export-/Druckvergleiche (PDF/SVG/DXF).
 - Das Benchmark-Werkzeug ist kein Ersatz für diese manuellen Funktionsprüfungen.
 
-Die Tests kompilieren die neuen Header, zwei originale Qt-Elementklassen und gezielt
-extrahierte geänderte Methodenkörper. FreeCAD-/OCCT-abhängige Klassen werden dabei
-nicht vollständig gebaut. Diese Grenze wird nicht durch statische Checks aufgehoben.
+Die schnellen Qt-Teiltests kompilieren die neuen Header, zwei originale Qt-Elementklassen
+und gezielt extrahierte geänderte Methodenkörper. Sie ersetzen keine Integrationstests
+mit FreeCAD/OCCT. Der separate Windows-Vollbuild kompiliert die vollständige Anwendung.
 
-## Vorbereitung der portablen Startprüfung
+## Portable Startprüfung unter Windows bestanden
 
 `scripts/portable_smoke.FCMacro` wird im Workflow-Modus `validate-artifact` mit dem
 entpackten Windows-Programm und separaten Konfigurationsdateien ausgeführt. Geprüft
@@ -70,7 +75,16 @@ Kantenauswahl, Maßtext-Eigenschaftsänderung, PDF/SVG/DXF-Dateierzeugung und er
 Öffnen der gespeicherten FCStd-Datei. Die asynchrone Projektion wird begrenzt abgewartet.
 Die Datei-Erzeugung beweist keine visuelle Exportgleichheit.
 
-Das Makro ist mit dem vorhandenen Linux-FreeCAD 1.0.0 erfolgreich erprobt, einschließlich
-aller fünf Prüfgruppen. Windows-1.1.4-Ergebnisse werden erst nach erfolgreichem
-Artefaktbuild erfasst. Der GUI-Start erfolgt offscreen; GPU-/Displayqualität ist damit
-nicht bewertet. Die neue Workflow-Variante wurde mit actionlint geprüft.
+[Lauf 38862598647](https://github.com/Mattisdenkhaus-cell/FreeCAD-TechDraw-Optimierung/actions/runs/38862598647)
+hat am 16. Oktober das unveränderte Archiv aus dem erfolgreichen Vollbuild unter
+Windows 2022 entpackt und mit isolierter Konfiguration gestartet. Alle fünf
+Prüfgruppen bestanden mit FreeCAD **1.1.4**; Prozessende erfolgreich. Der Job dauerte
+2 Minuten 8 Sekunden. Es wurde nicht neu kompiliert. Das Ergebnis aus dem Joblog
+ist dauerhaft in [windows-portable-38862598647.json](validation/windows-portable-38862598647.json)
+gesichert. Vollständige Exportdateien und Startlogs stehen im Ergebnisartefakt
+`FreeCAD-portable-smoke-38748155482` dieses Prüflaufs (7 Tage Aufbewahrung).
+
+Die Prüfung verwendet Qt offscreen. Sie bestätigt den portablen Programmstart und
+die genannten Funktionen an einem kleinen erzeugten Testdokument, aber keine
+GPU-/Displayqualität, visuelle Exportgleichheit oder Beschleunigung realer Zeichnungen.
+Das Makro war zuvor mit dem vorhandenen Linux-FreeCAD 1.0.0 erfolgreich erprobt.

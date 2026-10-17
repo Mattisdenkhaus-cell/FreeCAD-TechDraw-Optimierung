@@ -34,6 +34,37 @@ neu bündeln.
 
 ## Konfigurierbare Variante
 
+### Kurze Diagnose bei langsamer Kantenauswahl
+
+[`TechDrawSelectionDiagnose.FCMacro`](TechDrawSelectionDiagnose.FCMacro) verwendet
+denselben Ablauf mit Blattwahl und automatischer temporärer Kopie, führt aber nur
+**einen Aufwärmschritt und drei gemessene Auswahlvorgänge** aus. Kein kompletter
+Zoom-/Pan-/Bemaßungstest. Vorbereitung großer Dokumente kann weiterhin dauern.
+
+Die JSON-Datei enthält zusätzlich:
+
+- `selection_phases_ms`: Auswahl löschen, Auswahl setzen, Auswahl prüfen,
+  `Gui.updateGui()` und synchroner Viewport-Repaint getrennt; synchrone Beobachter
+  sind in den jeweiligen API-Aufrufen enthalten.
+- `selection_warmup` und `restore_ms`: bislang nicht ausgewiesene Aufwärm-/Rücksetzzeit.
+- `lifecycle_ms`: Kopieren/Snapshot, Laden, Recompute, Warten auf Projektion,
+  Anzeigen, Initialisierung, Test einschließlich Wiederherstellung und Aufräumen.
+  Gesamtzeit ab bestätigter Blattwahl bis nach dem Aufräumen, ohne Abschlussdialog
+  und abschließendes Schreiben der Diagnose-JSON.
+- `diagnostics`: QWidget-/Viewport-Einstellungen, die beiden Versuchsschalter
+  sowie Dokument-/Ansichtszahlen. Schalterwerte beweisen nicht, welcher Patch
+  in einer Programmdatei eingebaut ist.
+
+Zuerst in der langsamen Installation ausführen; für Versionsvergleiche dieselbe
+gespeicherte, unveränderte FCStd-Datei in beiden Installationen verwenden. Das Makro
+ändert keine Performance-Einstellungen. Die Kopie schützt das Original wie beim
+vollständigen Test. Ergebnisse liegen wieder unter **Dokumente/TechDrawTests**.
+
+Die getrennten Zeiten grenzen die Verzögerung ein; sie ersetzen kein C++-Profiling.
+Die Diagnose prüft die Auswahl-API, keine tatsächliche Mausauswahl oder Rastervorschau.
+
+### Vollständiger konfigurierbarer Test
+
 `TechDrawBench.FCMacro` läuft innerhalb von FreeCAD. Das Werkzeug greift nur auf
 Dokumentobjekte, Auswahl-API und Qt-**Widgets** zu. Es ruft weder `scene()` noch
 `items()` auf und verändert keine Qt-Grafikobjekt-Besitzstruktur.

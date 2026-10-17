@@ -49,7 +49,12 @@ class Runner:
         self.saved_scroll = (self.view.horizontalScrollBar().value(), self.view.verticalScrollBar().value())
         self.saved_selection = [(s.DocumentName, s.ObjectName, tuple(s.SubElementNames))
                                 for s in Gui.Selection.getSelectionEx()]
-        self.samples = {name: [] for name in ['redraw', 'zoom', 'pan', 'edge_selection', 'dimension_property_move']}
+        self.selection_diagnostics = bool(config.get('selection_diagnostics', False))
+        names = (['edge_selection'] if self.selection_diagnostics else
+                 ['redraw', 'zoom', 'pan', 'edge_selection', 'dimension_property_move'])
+        self.samples = {name: [] for name in names}
+        self.selection_phases = []
+        self.selection_warmup = []
         self.notes = {}
         self.warmup = int(config.get('warmup', 5))
         self.repeats = int(config.get('repeats', 30))
@@ -80,6 +85,23 @@ class Runner:
             'renderer_note': config.get('renderer_note', 'record renderer/settings manually'),
             'metric': 'GUI step wall time incl. synchronous viewport repaint; not FPS or GPU completion',
         }
+        if self.selection_diagnostics:
+            prefs = App.ParamGet('User parameter:BaseApp/Preferences/Mod/TechDraw/General')
+            mode = self.view.viewportUpdateMode()
+            self.result['diagnostics'] = {
+                'kind': 'selection-phases-v1',
+                'navigation_preview_preference': prefs.GetBool('NavigationPreview', False),
+                'partial_viewport_updates_preference': prefs.GetBool('PartialViewportUpdates', False),
+                'viewport_class': self.viewport.metaObject().className(),
+                'viewport_update_mode': int(getattr(mode, 'value', mode)),
+                'viewport_visible': self.viewport.isVisible(),
+                'viewport_region_empty': self.viewport.visibleRegion().isEmpty(),
+                'open_document_count': len(App.listDocuments()),
+                'document_object_count': len(self.doc.Objects),
+                'page_view_count': len(page_views),
+                'graphics_view_count': len(Gui.getMainWindow().findChildren(QtWidgets.QGraphicsView)),
+                'note': 'Preferences do not prove patch presence. Timings include synchronous selection observers; no FPS or CPU profile.',
+            }
         self.operations = iter((name, i) for name in self.samples for i in range(self.warmup + self.repeats))
         self.finished = False
         self.drag_transaction = False
@@ -95,6 +117,15 @@ class Runner:
         return self
 
     def operation(self, name, i):
+        self.last_selection_phases = {}
+        def timed(phase, callback):
+            if not self.selection_diagnostics or name != 'edge_selection':
+                return callback()
+            started = time.perf_counter_ns()
+            value = callback()
+            self.last_selection_phases[phase] = (time.perf_counter_ns() - started) / 1e6
+            return value
+
         sign = 1 if i % 2 == 0 else -1
         if name == 'redraw':
             pass
@@ -111,9 +142,10 @@ class Runner:
         elif name == 'edge_selection':
             if self.edge_view is None:
                 return 'No drawing view on page.'
-            self.Gui.Selection.clearSelection()
-            self.Gui.Selection.addSelection(self.doc.Name, self.edge_view.Name, self.edge)
-            selected = self.Gui.Selection.getSelectionEx()
+            timed('clear_selection', self.Gui.Selection.clearSelection)
+            timed('add_selection', lambda: self.Gui.Selection.addSelection(
+                self.doc.Name, self.edge_view.Name, self.edge))
+            selected = timed('verify_selection', self.Gui.Selection.getSelectionEx)
             if not any(s.ObjectName == self.edge_view.Name and self.edge in s.SubElementNames for s in selected):
                 raise RuntimeError('Edge selection was not accepted.')
         elif name == 'dimension_property_move':
@@ -123,8 +155,8 @@ class Runner:
             self.dimension.X = self.dimension_xy[0] + sign
             self.dimension.Y = self.dimension_xy[1]
             self.doc.recompute()
-        self.Gui.updateGui()
-        self.viewport.repaint()
+        timed('gui_update', self.Gui.updateGui)
+        timed('viewport_repaint', self.viewport.repaint)
         return None
 
     def step(self):
@@ -144,8 +176,12 @@ class Runner:
             elapsed = (time.perf_counter_ns() - started) / 1e6
             if skipped:
                 self.notes[name] = skipped
+            elif self.selection_diagnostics and i < self.warmup:
+                self.selection_warmup.append({'total_ms': elapsed, 'phases_ms': self.last_selection_phases})
             elif i >= self.warmup:
                 self.samples[name].append(elapsed)
+                if self.selection_diagnostics:
+                    self.selection_phases.append(self.last_selection_phases)
         except Exception as error:
             self.result['error'] = f'{type(error).__name__}: {error}'
             self.finish()
@@ -155,6 +191,7 @@ class Runner:
     def finish(self):
         if self.finished:
             return
+        restore_started = time.perf_counter_ns()
         self.finished = True
         self.timer.stop()
         try:
@@ -177,6 +214,10 @@ class Runner:
         self.result['samples_ms'] = self.samples
         self.result['summary'] = {name: summary(values) for name, values in self.samples.items()}
         self.result['notes'] = self.notes
+        if self.selection_diagnostics:
+            self.result['selection_phases_ms'] = self.selection_phases
+            self.result['selection_warmup'] = self.selection_warmup
+            self.result['restore_ms'] = (time.perf_counter_ns() - restore_started) / 1e6
         self.output.parent.mkdir(parents=True, exist_ok=True)
         self.output.write_text(json.dumps(self.result, indent=2), encoding='utf-8')
         self.App.Console.PrintMessage(f'TechDraw benchmark written: {self.output}\n')

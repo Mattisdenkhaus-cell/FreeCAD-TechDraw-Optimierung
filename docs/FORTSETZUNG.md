@@ -41,8 +41,10 @@ wurde am 17. Oktober um 12:03 UTC für Commit
 `3e22c3cdfa2fd8430bb62ee3494fe865f8bf15fd` gestartet: `mode=full-build`,
 `variant=optimized`, `confirm_long_build=true`, `parallel_jobs=2`.
 Bei Fortsetzung zuerst diesen Lauf prüfen und keinen doppelten Build starten.
-Nach Erfolg das neue Artefakt mit `validate-artifact` prüfen, dann reale Zeichnungen
-und die beiden Versuchsschalter testen. Ein Build-Erfolg wird hier noch nicht behauptet.
+Der Windows-Build ist erfolgreich abgeschlossen (17. Oktober, 17:00 Uhr Europe/Berlin).
+Der anschließende kurze Artefakttest benötigt keine neue Kompilierung. Die neue
+Benutzermessung zeigt jedoch eine deutliche Verzögerung bei der Auswahl; daher
+bleibt der PR ein Entwurf und die Navigationserweiterung standardmäßig aus.
 
 ## Nächste Freigabestufe
 
@@ -76,3 +78,20 @@ Der Entwicklungsbranch ist gepusht. Vorhandene Plattformauthentifizierung genüg
 keine zusätzlichen Tokens nötig. Die für die GitHub-API benötigte Domain
 `api.github.com` ist im Umgebungskonfigurationsentwurf ergänzt. Eine Veröffentlichung
 der Umgebung wird damit nicht behauptet.
+
+## Auswahlverzögerung: aktueller Untersuchungsstand (18. Oktober)
+
+Die vom Benutzer als optimierte Version bezeichnete Messung `693526d1` benötigt
+bei der API-Kantenauswahl median 15,87 s statt 2,67 s in `91c04b3e`. Zoom/Pan sind
+etwas schneller. Der Benutzer berichtet 5–10 Minuten Gesamtdauer; die alten JSONs
+messen nur einzelne Schritte, nicht die vollständige Laufzeit. Andere Quellversion
+(1.1.1/1.1.4) und saved-file/unsaved-snapshot verhindern eine eindeutige Zuordnung
+zum Patch. Details und nächste Untersuchungspunkte: `docs/AUSWAHLDIAGNOSE.md`.
+
+Neues eigenständiges `benchmarks/TechDrawSelectionDiagnose.FCMacro`: Blatt auswählen,
+automatische Kopie, ein Aufwärmschritt und drei Auswahlschritte. Speichert getrennte
+clear/add/verify/update/repaint-Zeiten sowie Vorbereitung, Wiederherstellung und
+Aufräumen. Lokal vier FreeCAD-API-/Kopierschutz-Prüffälle und sieben Python-Tests
+bestanden. Noch keine bestätigte Ursache oder C++-Behebung; kein neuer Vollbuild
+für die Diagnose nötig. Nächster benötigter Befund ist die Diagnose-JSON aus der
+langsamen Windows-Installation.

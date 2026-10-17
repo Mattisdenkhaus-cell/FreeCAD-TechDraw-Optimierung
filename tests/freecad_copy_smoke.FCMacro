@@ -54,7 +54,7 @@ try:
     QtWidgets.QMessageBox.warning = message
     QtWidgets.QMessageBox.critical = message
     macro = Path(__file__).resolve().parents[1] / 'benchmarks/TechDrawTest.FCMacro'
-    cases = iter(['saved', 'unsaved', 'cancel'])
+    cases = iter(['saved', 'unsaved', 'cancel', 'selection_diagnostic'])
     reports = []
     def snapshot():
         return {'filename': doc.FileName, 'modified': Gui.getDocument(doc.Name).Modified,
@@ -86,8 +86,10 @@ try:
             Gui.Selection.clearSelection()
             Gui.Selection.addSelection(doc.Name, 'Box')
             before = snapshot()
-            namespace = {'__name__': '__main__', '__file__': str(macro)}
-            exec(compile(macro.read_text(encoding='utf-8'), str(macro), 'exec'), namespace)
+            selected_macro = (macro.with_name('TechDrawSelectionDiagnose.FCMacro')
+                              if case == 'selection_diagnostic' else macro)
+            namespace = {'__name__': '__main__', '__file__': str(selected_macro)}
+            exec(compile(selected_macro.read_text(encoding='utf-8'), str(selected_macro), 'exec'), namespace)
             runner = namespace['TECHDRAW_TEST_RUNNER']
             assert runner is not None, dialogs
             copied_name = runner.doc.Name
@@ -109,6 +111,18 @@ try:
                     assert not result.get('restore_error'), result
                     if case == 'cancel':
                         assert 'abgebrochen' in result['error'], result
+                    elif case == 'selection_diagnostic':
+                        assert not result.get('error'), result
+                        assert list(result['samples_ms']) == ['edge_selection'], result
+                        assert result['summary']['edge_selection']['count'] == 3, result
+                        assert len(result['selection_warmup']) == 1, result
+                        assert len(result['selection_phases_ms']) == 3, result
+                        for phases in result['selection_phases_ms']:
+                            assert set(phases) == {'clear_selection', 'add_selection',
+                                                   'verify_selection', 'gui_update', 'viewport_repaint'}
+                            assert all(value >= 0 for value in phases.values())
+                        assert result['lifecycle_ms']['total_after_page_choice'] >= result['lifecycle_ms']['run_including_restore']
+                        assert result['diagnostics']['open_document_count'] >= 2
                     else:
                         assert not result.get('error'), result
                         assert all(v['count'] == 10 for v in result['summary'].values()), result

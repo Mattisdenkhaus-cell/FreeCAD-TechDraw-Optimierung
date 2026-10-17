@@ -27,21 +27,29 @@ Die zusätzlichen Ziele nach funktionalem Inventor-Vorbild sind in `docs/INTERAK
 untersucht. Der kombinierte Patch enthält jetzt optionale native Teilaktualisierung
 und eine begrenzte Zoom-/Pan-Rastervorschau mit exakter Rückkehr und Invalidierung.
 Beide Funktionen sind zunächst aus. Der alte erfolgreiche Windows-Build enthält
-sie noch nicht; ein weiterer mehrstündiger Build ist **nicht freigegeben**.
+sie noch nicht. Der Benutzer hat den neuen mehrstündigen Windows-Build am
+17. Oktober 2026 ausdrücklich freigegeben.
 Bisheriger SVG-Patch und ursprünglicher Workflow bleiben erhalten.
 Implementierung: `fe3f2ef`, DPI-/Darstellungskorrekturen: `6a67a47`, `c24b211`;
 plattformübergreifender Textvergleich: `e64445a`. Lokale Navigationstests bestehen
 bei vier DPI-Stufen; Messdaten und Prüfgrenzen stehen in `docs/VALIDIERUNG.md`.
 GitHub-Prüflauf `39030737964` für `e64445a` ist grün, einschließlich Sanitizern;
-Windows-Jobs wurden übersprungen. Nächster notwendiger Integrationsschritt ist
-ein ausdrücklich freigegebener neuer Windows-Build, danach Tests realer Zeichnungen.
+Windows-Jobs wurden in diesem Prüflauf übersprungen.
+
+Der freigegebene [Windows-Vollbuild 39031047030](https://github.com/Mattisdenkhaus-cell/FreeCAD-TechDraw-Optimierung/actions/runs/39031047030)
+wurde am 17. Oktober um 12:03 UTC für Commit
+`3e22c3cdfa2fd8430bb62ee3494fe865f8bf15fd` gestartet: `mode=full-build`,
+`variant=optimized`, `confirm_long_build=true`, `parallel_jobs=2`.
+Bei Fortsetzung zuerst diesen Lauf prüfen und keinen doppelten Build starten.
+Nach Erfolg das neue Artefakt mit `validate-artifact` prüfen, dann reale Zeichnungen
+und die beiden Versuchsschalter testen. Ein Build-Erfolg wird hier noch nicht behauptet.
 
 ## Nächste Freigabestufe
 
 - Windows-Vollbuild `38748155482` und anschließender kurzer Start-/Exporttest
   [38862598647](https://github.com/Mattisdenkhaus-cell/FreeCAD-TechDraw-Optimierung/actions/runs/38862598647)
   sind für den bisherigen Stand erfolgreich abgeschlossen. Alle fünf Prüfgruppen
-  bestanden. Für die neue Navigationserweiterung ist ein neuer Vollbuild erforderlich. Ergebnis dauerhaft unter `docs/validation/` gesichert.
+  bestanden. Der neue Vollbuild für die Navigationserweiterung ist oben verlinkt. Ergebnis dauerhaft unter `docs/validation/` gesichert.
 - Der PR bleibt bis zu realen Zeichnungsbenchmarks und manuellen Interaktions-/
   Sichtprüfungen ein Entwurf. Ein separater `upstream`-Vergleichsbuild wurde noch
   nicht freigegeben. Historischer Workflow und SVG-Patch sind unverändert.

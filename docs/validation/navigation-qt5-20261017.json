@@ -1,0 +1,53 @@
+{
+  "scope": "Synthetic native QWidget test, not a FreeCAD end-to-end or FPS benchmark",
+  "environment": "Debian 13, Qt 5.15.15, offscreen, g++ -O2, no sanitizers",
+  "source_patch_commit": "c24b211e908c3f2128557659f33974a820d38348",
+  "navigation_workload": "2000 paths, 20 zoom steps, forced widget capture plus event-loop processing",
+  "timing_note": "Single runs on shared cloud hardware; capture, burst and final exact draw recorded separately. No claim about Windows drawings.",
+  "selection_workload": {
+    "scene_paths": 2400,
+    "full_viewport_paints": 1120,
+    "partial_viewport_paints": 1,
+    "operation": "local pen color update, not full FreeCAD selection"
+  },
+  "measurements": [
+    {
+      "device_pixel_ratio": 1.0,
+      "exact_ns": 1066848242,
+      "initial_capture_ns": 8602946,
+      "preview_ns": 52719349,
+      "final_exact_ns": 15491561,
+      "preview_extra_paints": 0,
+      "vector_paints": 42780
+    },
+    {
+      "device_pixel_ratio": 1.25,
+      "exact_ns": 335978874,
+      "initial_capture_ns": 19549971,
+      "preview_ns": 121469837,
+      "final_exact_ns": 20576063,
+      "preview_extra_paints": 0,
+      "vector_paints": 42780
+    },
+    {
+      "device_pixel_ratio": 1.5,
+      "exact_ns": 424075706,
+      "initial_capture_ns": 15919160,
+      "preview_ns": 206469633,
+      "final_exact_ns": 19203467,
+      "preview_extra_paints": 0,
+      "vector_paints": 42780
+    },
+    {
+      "device_pixel_ratio": 2.0,
+      "exact_ns": 906756116,
+      "initial_capture_ns": 40781169,
+      "preview_ns": 311537325,
+      "final_exact_ns": 37783084,
+      "preview_extra_paints": 0,
+      "vector_paints": 42780
+    }
+  ],
+  "test_commit": "e64445a",
+  "recorded_date": "2026-10-17"
+}

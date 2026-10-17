@@ -58,12 +58,19 @@ Der historische Patch bleibt unverändert; der neue Git-Patch ersetzt dessen Anw
 für die optimierte Variante vollständig. Neue Header werden direkt eingebunden,
 keine zusätzliche CMake-Quelle oder Binärabhängigkeit nötig.
 
-## Bewusst nicht geändert
+## Begrenzte Bildschirmvorschau und Teilaktualisierungen
 
-Keine GUI-Threads, globalen Rastercaches, gröberen Auswahlflächen oder vereinfachten
-Geometrien. Kein pauschales Abschalten vollständiger Viewport-Aktualisierung, kein
-Umbau der Eigentümerschaft von Ansichtsprimitiven und keine Zwischenspeicherung von
-Maßwerten. Diese Eingriffe brauchen weitergehende visuelle und Interaktionstests.
+Der native QWidget-Viewport kann jetzt optional Qt-Änderungsregionen verwenden.
+`NavigationPreview` ergänzt separat einen kurzlebigen, auf 64 MiB begrenzten Cache
+für aktive Navigation. Beide Optionen sind zunächst aus; bestehende Geometrie-,
+SVG- und Exportpfade bleiben erhalten. Details, Invalidierungsregeln und bewusst
+akzeptierte Aufnahme-/Abschlusskosten stehen in [INTERAKTION.md](INTERAKTION.md).
+
+Keine zusätzlichen GUI-/OCCT-Threads, gröberen Auswahlflächen, vereinfachten
+Modellgeometrien oder zwischengespeicherten Maßwerte. Keine Änderung der
+Eigentümerschaft von Ansichtsprimitiven. OpenGL- und Image-Renderer behalten ihre
+bisherigen Aktualisierungsmodi. Die bereits vorhandenen asynchronen HLR-/Schnitt-
+und Flächenberechnungen werden nicht verändert.
 
 ## Build-Zeit
 

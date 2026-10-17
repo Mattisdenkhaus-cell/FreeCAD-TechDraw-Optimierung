@@ -1,4 +1,4 @@
-# Validierungsstand – 16. Oktober 2026
+# Validierungsstand – 17. Oktober 2026
 
 Basis FreeCAD 1.1.4: `4fd3bf320d9566a27e60069fc8387448aaa3a094`.
 Lokale Umgebung: Debian 13, Qt 5.15.15, g++, Raster-Offscreen-Qt-Tests.
@@ -111,3 +111,49 @@ Dies bestätigt den Ablauf an einem kleinen TechDraw-Testdokument, nicht die
 Windows-Dialogdarstellung, beliebige externe Dokumentverknüpfungen oder die
 Performance der optimierten Version. Die sieben bestehenden Python-Tests bestanden
 weiterhin. Kein Windows-Vollbuild für die Makroänderung erforderlich.
+
+## Zusätzliche native Navigationstests
+
+Der erweiterte kombinierte Patch wurde auf einen weiteren frischen offiziellen
+1.1.4-Checkout angewendet; alle elf geänderten/neuen Quelldateien stimmen mit dem
+Entwicklungscheckout überein. Historischer SVG-Patch und ursprünglicher Workflow
+bleiben unverändert. Kein zusätzlicher Windows-Vollbuild wurde gestartet.
+
+Die Qt-Fixtures kompilieren den tatsächlichen `QGVPage`-Paintpfad, Renderer-/
+Preview-Steuerung, Hintergrundroutine sowie `QGVNavStyle::zoom/pan` mit dem neuen
+Header. Geprüft werden:
+
+- Keine Vektor-Paint-Aufrufe innerhalb eines erfolgreich gecachten Bildschirm-Paints.
+- Native Teilaktualisierung bei lokaler Farbänderung: 1 statt 1.120 Item-Paints in
+  einer künstlichen Szene mit 2.400 Pfaden. Das ist kein kompletter FreeCAD-Auswahltest.
+- Szenenänderungen, Auswahl, Verschieben, Textänderung, Ausblenden, Löschen, Zerstörung
+  der Szene, fehlende Abdeckung, Größen-/Renderhint-Wechsel und Rückfallmodi.
+- Gleiche Auswahlgeometrie/Positionen und bytegleicher SVG-Szenenexport während der
+  Vorschau. Pixelgleiches exaktes Endbild nach Ablauf des Ruhe-Timers.
+- Hintergrundgleichheit gegenüber der ursprünglichen Routine, einschließlich
+  transparenter Farben, aktivem Qt-Hintergrundcache, Rotation und Skalierung.
+- Begrenzte Bildallokation, ungültige Größen/DPI-Werte und Ausrichtung auf physische
+  Pixel bei ungeraden Fenstergrößen bei 100, 125, 150 und 200 % Skalierung. Außerhalb
+  von Text sind höchstens 4 von 255 Abweichung pro Farbkanal erlaubt. Qt-Versionen
+  verwenden beim Text unterschiedliche Kantenglättung: Hier werden die Vordergrund-
+  konturen in beiden Richtungen mit höchstens einem physischen Pixel Abstand geprüft.
+  Für das exakte Endbild und den SVG-Szenenexport gilt weiterhin Bytegleichheit.
+
+Ein beispielhafter nicht instrumentierter Durchlauf mit 2.000 Pfaden bei 100 % DPI:
+20 Zoomschritte exakt etwa **1.067 ms**, Vorschau-Schritte **53 ms**, erste Aufnahme
+**9 ms**, abschließendes exaktes Zeichnen **15 ms**. Die Messung enthält erzwungene
+Widget-Aufnahmen und Eventloop-Verarbeitung; auf geteilter Cloud-Hardware schwanken
+diese Einzelmessungen erheblich. Sie beweist keine Beschleunigung einer
+realen Windows-Zeichnung. Einzelwerte einschließlich höherer DPI-Stufen stehen in
+[navigation-qt5-20261017.json](validation/navigation-qt5-20261017.json).
+
+Die 120-ms-Ruhefrist bleibt auch unter Sanitizern aktiv. Wird sie wegen langsamer
+Ausführung überschritten, darf ein korrektes exaktes Zwischenbild entstehen;
+diese zusätzlichen Paints werden separat gezählt, nicht künstlich unterdrückt.
+Die ungecachte Abschlussarbeit wird ebenfalls separat ausgewiesen.
+
+[GitHub-Prüflauf 39030737964](https://github.com/Mattisdenkhaus-cell/FreeCAD-TechDraw-Optimierung/actions/runs/39030737964)
+bestand am 17. Oktober für `e64445a`: saubere Patchanwendung, sieben Python-Tests,
+Qt-Regressionen in beiden SVG-Schalterstellungen sowie AddressSanitizer und
+UndefinedBehaviorSanitizer. Windows-Jobs wurden übersprungen. Die vier DPI-Stufen
+wurden zusätzlich lokal mit `--navigation-only` geprüft; CI prüft standardmäßig 100 %.

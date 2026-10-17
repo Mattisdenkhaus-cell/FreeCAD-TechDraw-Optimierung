@@ -21,12 +21,27 @@ Abgeschlossene Schritte sind in getrennten Git-Commits gesichert.
    Artefakt-ID: `11994042499`, rund 642 MB, Ablauf am 22. Oktober 2026 um 17:27 UTC.
    Download und Startanleitung stehen im README.
 
+## Erweiterung für flüssige Navigation
+
+Die zusätzlichen Ziele nach funktionalem Inventor-Vorbild sind in `docs/INTERAKTION.md`
+untersucht. Der kombinierte Patch enthält jetzt optionale native Teilaktualisierung
+und eine begrenzte Zoom-/Pan-Rastervorschau mit exakter Rückkehr und Invalidierung.
+Beide Funktionen sind zunächst aus. Der alte erfolgreiche Windows-Build enthält
+sie noch nicht; ein weiterer mehrstündiger Build ist **nicht freigegeben**.
+Bisheriger SVG-Patch und ursprünglicher Workflow bleiben erhalten.
+Implementierung: `fe3f2ef`, DPI-/Darstellungskorrekturen: `6a67a47`, `c24b211`;
+plattformübergreifender Textvergleich: `e64445a`. Lokale Navigationstests bestehen
+bei vier DPI-Stufen; Messdaten und Prüfgrenzen stehen in `docs/VALIDIERUNG.md`.
+GitHub-Prüflauf `39030737964` für `e64445a` ist grün, einschließlich Sanitizern;
+Windows-Jobs wurden übersprungen. Nächster notwendiger Integrationsschritt ist
+ein ausdrücklich freigegebener neuer Windows-Build, danach Tests realer Zeichnungen.
+
 ## Nächste Freigabestufe
 
 - Windows-Vollbuild `38748155482` und anschließender kurzer Start-/Exporttest
   [38862598647](https://github.com/Mattisdenkhaus-cell/FreeCAD-TechDraw-Optimierung/actions/runs/38862598647)
-  sind erfolgreich abgeschlossen. Alle fünf Prüfgruppen bestanden; kein erneuter
-  Vollbuild nötig. Ergebnis dauerhaft unter `docs/validation/` gesichert.
+  sind für den bisherigen Stand erfolgreich abgeschlossen. Alle fünf Prüfgruppen
+  bestanden. Für die neue Navigationserweiterung ist ein neuer Vollbuild erforderlich. Ergebnis dauerhaft unter `docs/validation/` gesichert.
 - Der PR bleibt bis zu realen Zeichnungsbenchmarks und manuellen Interaktions-/
   Sichtprüfungen ein Entwurf. Ein separater `upstream`-Vergleichsbuild wurde noch
   nicht freigegeben. Historischer Workflow und SVG-Patch sind unverändert.

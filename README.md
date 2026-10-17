@@ -3,7 +3,7 @@
 Entwicklungsstand für flüssigere Bearbeitung bereits berechneter Zeichnungen.
 Die Änderungen liegen als **gemeinsamer C++-Patch** für den verifizierten
 FreeCAD-Commit `4fd3bf320d9566a27e60069fc8387448aaa3a094` vor.
-Die optimierte portable Windows-Version wurde erfolgreich gebaut. Reale
+Der bisherige Optimierungsstand wurde erfolgreich als portable Windows-Version gebaut. Reale
 Zeichnungsvergleiche und manuelle Funktionsprüfungen stehen vor einer Freigabe noch aus.
 
 - Auswahlumrisse und Begrenzungsrechtecke von Kanten wiederverwenden.
@@ -16,6 +16,14 @@ Der historische `FreeCAD_1.1.4_TechDraw_BatchedSvgHatch_KORRIGIERT.patch` und
 `.github/workflows/freecad-techdraw-build.yml` bleiben unverändert als Rückfallstand.
 Der neue Patch wird **allein** auf die unveränderten offiziellen Quellen angewendet,
 nicht zusätzlich zum historischen Patch.
+
+## Neue Interaktionsoptimierung im Entwicklungsbranch
+
+Zusätzlich enthält der Patch jetzt zwei **zunächst ausgeschaltete** Versuchsfunktionen:
+Teilaktualisierung des nativen Bildschirms und eine begrenzte Rastervorschau während
+Zoom/Pan. Exakte Szene, Bemaßungsgeometrie und Export bleiben erhalten. Diese Erweiterung
+ist **noch nicht im unten verlinkten Windows-Paket enthalten**. Funktionsweise,
+Schalter und Grenzen: [Interaktionsanalyse](docs/INTERAKTION.md).
 
 ## Schnelle lokale Prüfung (Linux, Qt 5.15)
 

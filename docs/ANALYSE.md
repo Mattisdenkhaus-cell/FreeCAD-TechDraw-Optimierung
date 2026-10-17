@@ -33,6 +33,15 @@ Entwicklung auf `development/techdraw-performance`; kein Windows-Vollbuild ohne 
   CI-Extraktion verwirft die Kontextzeile mit dem ursprünglichen Konstruktor im
   `#else`-Zweig. Ein regulärer Git-Patch soll die Textanker-Extraktion ersetzen.
 
+## Ergänzung: Interaktionsdarstellung
+
+Die weiterführende Analyse vorhandener Hintergrundberechnungen, Caches und der
+Trennung zwischen exakter Geometrie und Bildschirmdarstellung steht in
+[INTERAKTION.md](INTERAKTION.md). Der neue Entwicklungsstand ergänzt optionale native
+Teilaktualisierung und eine begrenzte Navigation-Rastervorschau. Die ursprünglichen
+Vorbehalte gegenüber einem pauschalen Rendererwechsel bleiben bestehen; beide
+Optionen sind bis zur Prüfung der Zielinstallation standardmäßig deaktiviert.
+
 ## Vorgehen und Grenzen
 
 Gezielte Qt-C++-Teiltests statt FreeCAD-Vollbuild; Caches gegen ungecachte

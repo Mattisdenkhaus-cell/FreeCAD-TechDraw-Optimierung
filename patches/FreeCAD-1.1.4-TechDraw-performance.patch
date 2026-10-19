@@ -218,10 +218,10 @@ index 0000000..a2f749f
 +#endif
 diff --git a/src/Mod/TechDraw/Gui/QGIBatchedSvgHatch.h b/src/Mod/TechDraw/Gui/QGIBatchedSvgHatch.h
 new file mode 100644
-index 0000000..613de41
+index 0000000..d92e383
 --- /dev/null
 +++ b/src/Mod/TechDraw/Gui/QGIBatchedSvgHatch.h
-@@ -0,0 +1,157 @@
+@@ -0,0 +1,168 @@
 +// SPDX-License-Identifier: LGPL-2.1-or-later
 +#ifndef TECHDRAWGUI_QGIBATCHEDSVGHATCH_H
 +#define TECHDRAWGUI_QGIBATCHEDSVGHATCH_H
@@ -343,6 +343,19 @@ index 0000000..613de41
 +        }
 +    }
 +
++    template<class Visitor>
++    void forEachPaintedTile(const QPainter& painter, const QStyleOptionGraphicsItem* option,
++                            Visitor visit) const
++    {
++        QRectF exposed = option && option->exposedRect.isValid()
++            ? option->exposedRect : boundingRect();
++        // exposedRect describes the viewport, not necessarily the parent face clip.
++        // Narrow section faces otherwise render tiles hidden by ItemClipsChildrenToShape.
++        if (painter.hasClipping())
++            exposed = exposed.intersected(painter.clipBoundingRect());
++        forEachVisibleTile(exposed, visit);
++    }
++
 +    void paint(QPainter* painter, const QStyleOptionGraphicsItem* option,
 +               QWidget* widget = nullptr) override
 +    {
@@ -350,9 +363,7 @@ index 0000000..613de41
 +        if (!m_renderer || !m_renderer->isValid()) {
 +            return;
 +        }
-+        const QRectF exposed = option && option->exposedRect.isValid()
-+            ? option->exposedRect : boundingRect();
-+        forEachVisibleTile(exposed, [&](const QPointF& position) {
++        forEachPaintedTile(*painter, option, [&](const QPointF& position) {
 +            // Match QGraphicsSvgItem's local transform, including cosmetic SVG strokes.
 +            painter->save();
 +            painter->translate(position);

@@ -133,6 +133,23 @@ static void tileRanges()
     batch.configureTiles(&renderer, 2, 3, 0, 10, QPointF(), 1, 100);
     batch.forEachVisibleTile(QRectF(-1, -1, 100, 100), [&](QPointF) { ++visible; });
     CHECK(visible == 0);
+    // A viewport exposure can be much larger than the clipping face. Exercise
+    // the SAME tile visitor used by paint(), not merely the raw grid range.
+    batch.configureTiles(&renderer, 100, 100, 8, 13, QPointF(), 1, 10000);
+    QImage clippedImage(800, 1300, QImage::Format_ARGB32_Premultiplied);
+    QPainter painter(&clippedImage);
+    QStyleOptionGraphicsItem option;
+    option.exposedRect = QRectF(0, 0, 800, 1300);
+    int unclipped = 0, clipped = 0;
+    batch.forEachPaintedTile(painter, &option, [&](QPointF) { ++unclipped; });
+    painter.setClipRect(QRectF(15, 30, 1, 800));
+    batch.forEachPaintedTile(painter, &option, [&](QPointF) { ++clipped; });
+    CHECK(unclipped == 10000 && clipped == 62);
+    painter.setClipRect(QRectF());
+    clipped = 0;
+    batch.forEachPaintedTile(painter, &option, [&](QPointF) { ++clipped; });
+    CHECK(clipped == 0);
+    std::cout << "PASS SVG parent clip: 62 instead of 10000 tile visits; empty clip skips all\n";
     std::cout << "PASS SVG ranges: 400 reference grids, limits, reset, invalid size, huge grid\n";
 }
 

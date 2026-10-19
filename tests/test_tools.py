@@ -45,6 +45,17 @@ class SummaryTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'restore'):
             compare(a, b)
 
+    def test_direct_and_copied_selection_are_not_comparable(self):
+        a, b = self.results()
+        a['copy_mode'], b['copy_mode'] = 'saved-file', 'existing-document'
+        with self.assertRaisesRegex(ValueError, 'copy_mode'):
+            compare(a, b)
+        b['copy_mode'] = a['copy_mode']
+        a['diagnostics'] = {'open_document_count': 2}
+        b['diagnostics'] = {'open_document_count': 1}
+        with self.assertRaisesRegex(ValueError, 'open_document_count'):
+            compare(a, b)
+
     def test_invalid_samples(self):
         a, b = self.results()
         b['samples_ms']['zoom'][0] = float('nan')

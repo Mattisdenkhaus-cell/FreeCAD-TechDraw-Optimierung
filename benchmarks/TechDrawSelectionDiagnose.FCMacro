@@ -240,7 +240,7 @@ def start():
     return Runner(App, Gui, QtCore, QtWidgets, config).start()
 
 
-"""Run the selected page in an automatic temporary copy of the open document."""
+"""Test a selected page; use a copy for model edits or unsaved input."""
 from datetime import datetime
 from pathlib import Path
 import json
@@ -298,7 +298,7 @@ def start_interactive(selection_diagnostics=False):
         return None
     names = [f'{page.Label} ({page.Name})' for page in pages]
     chosen, ok = QtWidgets.QInputDialog.getItem(
-        parent, title, 'Zeichnungsblatt auswählen – Test läuft in einer automatischen Kopie:',
+        parent, title, 'Zeichnungsblatt auswählen:',
         names, 0, False)
     if not ok:
         return None
@@ -308,12 +308,13 @@ def start_interactive(selection_diagnostics=False):
     selection = [(s.DocumentName, s.ObjectName, tuple(s.SubElementNames))
                  for s in Gui.Selection.getSelectionEx()]
     temporary = None
-    copy_doc = None
+    test_doc = None
     copy_name = None
     progress = None
     preparation = {}
     output = None
     preparing = True
+    use_existing = False
     trace = {'status': 'preparing', 'stage': 'initialize', 'page': page_name,
              'freecad': App.Version(), 'qt': QtCore.qVersion(),
              'freecad_home': App.getHomePath(), 'preparation_ms': preparation}
@@ -334,7 +335,7 @@ def start_interactive(selection_diagnostics=False):
             checkpoint(phase)
         return value
 
-    def cleanup():
+    def cleanup(restore_selection=True):
         # Only the document opened by this invocation may be discarded.
         if copy_name is not None and copy_name in App.listDocuments():
             Gui.getDocument(copy_name).Modified = False
@@ -342,10 +343,11 @@ def start_interactive(selection_diagnostics=False):
             App.closeDocument(copy_name)
         if original_name in App.listDocuments():
             App.setActiveDocument(original_name)
-        Gui.Selection.clearSelection()
-        for document, obj, subs in selection:
-            for sub in subs or ('',):
-                Gui.Selection.addSelection(document, obj, sub)
+        if restore_selection:
+            Gui.Selection.clearSelection()
+            for document, obj, subs in selection:
+                for sub in subs or ('',):
+                    Gui.Selection.addSelection(document, obj, sub)
         if temporary is not None:
             temporary.cleanup()
         if progress is not None:
@@ -353,8 +355,8 @@ def start_interactive(selection_diagnostics=False):
 
     class InteractiveRunner(Runner):
         def start(self):
-            # This document is disposable. Avoid cross-document undo transactions;
-            # closing it discards all temporary dimension changes after the run.
+            # Full tests edit only the disposable copy. Direct diagnostics select
+            # edges only; neither path needs a cross-document undo transaction.
             self.started_at = time.perf_counter_ns()
             self.timer.start(100)
             return self
@@ -380,7 +382,7 @@ def start_interactive(selection_diagnostics=False):
                 failures.append(f'Ergebnis konnte nicht geschrieben werden: {error}')
             run_finished = time.perf_counter_ns()
             try:
-                cleanup()
+                cleanup(restore_selection=not use_existing or bool(self.result.get('restore_error')))
             except Exception as error:
                 failures.append(f'Temporäre Testkopie konnte nicht aufgeräumt werden: {error}')
                 if progress is not None:
@@ -415,8 +417,10 @@ def start_interactive(selection_diagnostics=False):
                     rows.append(f'{labels[name]}: nicht vollständig gemessen '
                                 '(z. B. kein Scrollbereich oder keine Bemaßung)')
             QtWidgets.QMessageBox.information(
-                parent, title, '\n'.join(rows) + '\n\nDein Original wurde nicht bearbeitet. '
-                'Die temporäre Testkopie wurde geschlossen. Kleinere Zeiten sind besser; '
+                parent, title, '\n'.join(rows) + '\n\n' +
+                ('Geometrie und Bemaßungen wurden nicht verändert; die Auswahl wurde wiederhergestellt. '
+                 if use_existing else 'Dein Original wurde nicht bearbeitet. Die temporäre Testkopie wurde geschlossen. ') +
+                'Kleinere Zeiten sind besser; '
                 'dies misst keine FPS und kein tatsächliches Mausziehen.'
                 f'\n\nErgebnis: {self.output}\n\nFür einen Vergleich dieselbe gespeicherte '
                 'Zeichnung in beiden Versionen testen und die JSON-Dateien aufbewahren.')
@@ -440,25 +444,38 @@ def start_interactive(selection_diagnostics=False):
         progress.setAutoClose(False)
         progress.setAutoReset(False)
         progress.setValue(0)
-        temporary = tempfile.TemporaryDirectory(prefix='techdraw-test-')
-        copy_path = Path(temporary.name) / 'TechDrawTest.FCStd'
         saved_source = (bool(original.FileName) and Path(original.FileName).is_file()
                         and not Gui.getDocument(original_name).Modified)
-        if saved_source:
-            # Preserve identical bytes/hashes for comparisons across FreeCAD versions.
-            prepare('copy_saved_file', lambda: shutil.copy2(original.FileName, copy_path))
+        active_view = Gui.getDocument(original_name).activeView()
+        active_page = active_view.getPage() if hasattr(active_view, 'getPage') else None
+        use_existing = (selection_diagnostics and saved_source and active_page is not None
+                        and active_page.Name == page_name)
+        if use_existing:
+            # Selection-only diagnostics do not change model properties or recompute.
+            test_doc = original
+            copy_path = Path(original.FileName)
+            trace['copy_mode'] = 'existing-document'
+            progress.setLabelText('Vorhandenes Blatt wird geprüft – keine erneute Dokumentkopie.')
         else:
-            # saveCopy includes unsaved edits without renaming/saving the original document.
-            prepare('save_unsaved_snapshot', lambda: original.saveCopy(str(copy_path)))
-        trace['copy_mode'] = 'saved-file' if saved_source else 'unsaved-snapshot'
+            temporary = tempfile.TemporaryDirectory(prefix='techdraw-test-')
+            copy_path = Path(temporary.name) / 'TechDrawTest.FCStd'
+            if saved_source:
+                # Preserve identical bytes/hashes for comparisons across FreeCAD versions.
+                prepare('copy_saved_file', lambda: shutil.copy2(original.FileName, copy_path))
+            else:
+                # saveCopy includes unsaved edits without renaming/saving the original document.
+                prepare('save_unsaved_snapshot', lambda: original.saveCopy(str(copy_path)))
+            trace['copy_mode'] = 'saved-file' if saved_source else 'unsaved-snapshot'
+            trace['fixture_sha256'] = hashlib.sha256(copy_path.read_bytes()).hexdigest()
+            test_doc = prepare('open_copy', lambda: App.openDocument(str(copy_path)))
+            copy_name = test_doc.Name
         trace['fixture_sha256'] = hashlib.sha256(copy_path.read_bytes()).hexdigest()
-        copy_doc = prepare('open_copy', lambda: App.openDocument(str(copy_path)))
-        copy_name = copy_doc.Name
-        trace['document_object_count'] = len(copy_doc.Objects)
-        trace['invalid_objects'] = [o.Name for o in copy_doc.Objects if 'Invalid' in o.State]
-        prepare('recompute_copy', copy_doc.recompute)
-        copy_page = copy_doc.getObject(page_name)
-        projected = next((v for v in copy_page.Views
+        trace['document_object_count'] = len(test_doc.Objects)
+        trace['invalid_objects'] = [o.Name for o in test_doc.Objects if 'Invalid' in o.State]
+        if not use_existing:
+            prepare('recompute_copy', test_doc.recompute)
+        test_page = test_doc.getObject(page_name)
+        projected = next((v for v in test_page.Views
                           if v.isDerivedFrom('TechDraw::DrawViewPart')), None)
         timer = QtCore.QElapsedTimer()
         timer.start()
@@ -466,7 +483,7 @@ def start_interactive(selection_diagnostics=False):
         while projected is not None:
             elapsed = timer.elapsed()
             if elapsed - last_snapshot >= 1000:
-                trace['projection_state'] = projection_snapshot(copy_page)
+                trace['projection_state'] = projection_snapshot(test_page)
                 preparation['wait_projection'] = elapsed
                 checkpoint('wait_projection')
                 last_snapshot = elapsed
@@ -489,13 +506,15 @@ def start_interactive(selection_diagnostics=False):
             QtCore.QTimer.singleShot(20, loop.quit)
             loop.exec_()
         preparation['wait_projection'] = timer.elapsed()
-        trace['projection_state'] = projection_snapshot(copy_page)
-        App.setActiveDocument(copy_name)
-        prepare('show_page', Gui.getDocument(copy_name).getObject(page_name).show)
-        prepare('initial_gui_update', Gui.updateGui)
+        trace['projection_state'] = projection_snapshot(test_page)
+        if not use_existing:
+            App.setActiveDocument(test_doc.Name)
+            prepare('show_page', Gui.getDocument(test_doc.Name).getObject(page_name).show)
+            prepare('initial_gui_update', Gui.updateGui)
         # Recomputing the disposable copy may mark it modified. The original and
         # the copied input bytes remain untouched; only this temporary GUI flag resets.
-        Gui.getDocument(copy_name).Modified = False
+        if not use_existing:
+            Gui.getDocument(copy_name).Modified = False
         runner = prepare('initialize_runner', lambda: InteractiveRunner(App, Gui, QtCore, QtWidgets,
                                    {'page': page_name, 'label': 'automatic-copy', 'output': str(output),
                                     'page_already_shown': True,
@@ -504,7 +523,7 @@ def start_interactive(selection_diagnostics=False):
                                     'selection_diagnostics': selection_diagnostics}))
         runner.result['source_label'] = original.Label
         runner.result['freecad_home'] = App.getHomePath()
-        runner.result['copy_mode'] = 'saved-file' if saved_source else 'unsaved-snapshot'
+        runner.result['copy_mode'] = trace['copy_mode']
         trace['status'] = 'prepared'
         checkpoint('prepared')
         # Runner owns this same output after setup; cleanup must not overwrite it.

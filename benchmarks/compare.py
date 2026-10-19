@@ -15,6 +15,14 @@ def compare(before, after):
         if result.get('error') or result.get('restore_error'):
             raise ValueError('A benchmark failed or could not restore state; results are not comparable.')
     mismatches = [key for key in CONDITIONS if key not in before or key not in after or before[key] != after[key]]
+    # Direct selection diagnostics and copied-document tests have different GUI work.
+    if before.get('copy_mode') != after.get('copy_mode'):
+        mismatches.append('copy_mode')
+    for key in ('navigation_preview_preference', 'partial_viewport_updates_preference',
+                'viewport_class', 'viewport_update_mode', 'open_document_count',
+                'document_object_count', 'page_view_count'):
+        if before.get('diagnostics', {}).get(key) != after.get('diagnostics', {}).get(key):
+            mismatches.append('diagnostics.' + key)
     if mismatches:
         raise ValueError('Different or missing conditions: ' + ', '.join(mismatches))
     rows = []

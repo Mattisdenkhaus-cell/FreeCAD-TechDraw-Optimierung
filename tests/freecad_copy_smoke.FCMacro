@@ -54,7 +54,8 @@ try:
     QtWidgets.QMessageBox.warning = message
     QtWidgets.QMessageBox.critical = message
     macro = Path(__file__).resolve().parents[1] / 'benchmarks/TechDrawTest.FCMacro'
-    cases = iter(['saved', 'unsaved', 'cancel', 'selection_diagnostic', 'open_failure'])
+    cases = iter(['saved', 'selection_existing', 'selection_existing_cancel',
+                  'unsaved', 'cancel', 'selection_diagnostic', 'open_failure'])
     reports = []
     def snapshot():
         return {'filename': doc.FileName, 'modified': Gui.getDocument(doc.Name).Modified,
@@ -64,7 +65,7 @@ try:
                 'selection': [(s.DocumentName, s.ObjectName, list(s.SubElementNames))
                               for s in Gui.Selection.getSelectionEx()]}
     def fail():
-        root.joinpath('error.txt').write_text(traceback.format_exc())
+        root.joinpath('error.txt').write_text(traceback.format_exc(), encoding='utf-8')
         for name in list(App.listDocuments()):
             Gui.getDocument(name).Modified = False
             App.closeDocument(name)
@@ -79,6 +80,11 @@ try:
             Gui.getMainWindow().close()
             return
         try:
+            if case in ('selection_existing', 'selection_existing_cancel'):
+                Gui.getDocument(doc.Name).getObject('Page').show()
+                Gui.updateGui()
+                doc.save()
+                Gui.getDocument(doc.Name).Modified = False
             if case == 'unsaved':
                 doc.openTransaction('Unsaved user edit')
                 doc.Dimension.X = 42
@@ -87,7 +93,7 @@ try:
             Gui.Selection.addSelection(doc.Name, 'Box')
             before = snapshot()
             selected_macro = (macro.with_name('TechDrawSelectionDiagnose.FCMacro')
-                              if case == 'selection_diagnostic' else macro)
+                              if case in ('selection_diagnostic', 'selection_existing', 'selection_existing_cancel') else macro)
             namespace = {'__name__': '__main__', '__file__': str(selected_macro)}
             if case == 'open_failure':
                 previous_outputs = set(root.joinpath('downloads').glob('*.json'))
@@ -118,25 +124,31 @@ try:
             runner = namespace['TECHDRAW_TEST_RUNNER']
             assert runner is not None, dialogs
             copied_name = runner.doc.Name
-            assert copied_name != doc.Name
+            existing = case in ('selection_existing', 'selection_existing_cancel')
+            assert (copied_name == doc.Name) == existing
             if case == 'unsaved':
                 assert runner.doc.Dimension.X.Value == 42
-            if case == 'cancel':
+            if case in ('cancel', 'selection_existing_cancel'):
                 progress = Gui.getMainWindow().findChildren(QtWidgets.QProgressDialog)[-1]
                 progress.cancel()
             def check():
                 try:
-                    if not runner.finished or not runner.output.exists() or copied_name in App.listDocuments():
+                    if not runner.finished or not runner.output.exists() or (not existing and copied_name in App.listDocuments()):
                         QtCore.QTimer.singleShot(100, check)
                         return
                     result = json.loads(runner.output.read_text())
+                    # finish() sets its reentry guard before updateGui(); the
+                    # direct document stays open, so wait for the final report too.
+                    if existing and 'lifecycle_ms' not in result:
+                        QtCore.QTimer.singleShot(100, check)
+                        return
                     assert snapshot() == before, (before, snapshot())
                     assert App.ActiveDocument.Name == doc.Name
-                    assert copied_name not in App.listDocuments()
+                    assert existing or copied_name not in App.listDocuments()
                     assert not result.get('restore_error'), result
-                    if case == 'cancel':
+                    if case in ('cancel', 'selection_existing_cancel'):
                         assert 'abgebrochen' in result['error'], result
-                    elif case == 'selection_diagnostic':
+                    elif case in ('selection_diagnostic', 'selection_existing'):
                         assert not result.get('error'), result
                         assert list(result['samples_ms']) == ['edge_selection'], result
                         assert result['summary']['edge_selection']['count'] == 3, result
@@ -147,15 +159,18 @@ try:
                                                    'verify_selection', 'gui_update', 'viewport_repaint'}
                             assert all(value >= 0 for value in phases.values())
                         assert result['lifecycle_ms']['total_after_page_choice'] >= result['lifecycle_ms']['run_including_restore']
-                        assert result['diagnostics']['open_document_count'] >= 2
+                        assert result['diagnostics']['open_document_count'] == (1 if existing else 2)
                         trace = result['preparation_diagnostic']
                         assert trace['status'] == 'prepared' and trace['stage'] == 'prepared', trace
                         assert trace['projection_state'][0]['first_edge_available'], trace
                         assert trace['fixture_sha256'] == result['fixture_sha256']
+                        if existing:
+                            assert result['copy_mode'] == 'existing-document'
+                            assert not {'open_copy', 'recompute_copy', 'copy_saved_file'} & trace['preparation_ms'].keys()
                     else:
                         assert not result.get('error'), result
                         assert all(v['count'] == 10 for v in result['summary'].values()), result
-                    reports.append({'case': case, 'original_preserved': True, 'copy_closed': True,
+                    reports.append({'case': case, 'original_preserved': True, 'copy_closed': not existing,
                                     'mode': result['copy_mode'], 'output': str(runner.output)})
                     QtCore.QTimer.singleShot(0, next_case)
                 except Exception:

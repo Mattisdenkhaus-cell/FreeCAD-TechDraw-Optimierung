@@ -71,8 +71,10 @@ Ein separater Qt-Versuch zeigt die SVG-Clip-Lücke: Bei einer schmalen Elternfl�
 betrug `option.exposedRect` rund 484 × 484, der aktive Painter-Clip dagegen 6 × 201.
 Das bisherige Batching besuchte trotzdem Kacheln außerhalb dieses Clips. Der neue
 Zeichenpfad schneidet den Expositionsbereich zusätzlich mit `clipBoundingRect()`;
-die Clip-Begrenzung ist konservativ, die eigentliche Qt-Pfadbeschneidung bleibt aktiv.
-Ein Regressionstest begrenzt 10.000 mögliche Kachelbesuche auf die 62 im schmalen Clip.
+zwei zusätzliche Gerätepixel erhalten dabei Antialias-/SVG-Strichränder auch bei
+Rotation. Die eigentliche Qt-Pfadbeschneidung bleibt aktiv. Der strikte Pixelvergleich
+fand ohne diesen Rand eine Abweichung bei 90 Grad; seine Toleranz wurde nicht gelockert.
+Ein Regressionstest begrenzt 10.000 mögliche Kachelbesuche auf die 124 am schmalen Clip inklusive Antialias-Rand.
 Bestehende Pixelvergleiche mit originalen SVG-Items prüfen die Ausgabe weiterhin.
 Diese Korrektur erhält SVG-Batching, exakte Geometrie und Vektorzeichnung. Sie ist
 noch kein Nachweis, dass der komplette Zehn-Minuten-Fall behoben ist.

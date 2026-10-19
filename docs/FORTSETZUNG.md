@@ -21,7 +21,7 @@ Projektion nach 60 s. Noch keine vollständige optimierte Vergleichsmessung.
   Neun Python-Tests und sieben lokale FreeCAD-API-/Schutzfälle bestanden.
 - `cf1b9b8`: SVG-Batching berücksichtigt zusätzlich die tatsächliche Painter-Clipgrenze.
   Reproduzierter Qt-Fall: Fensterexposition reicht weit über eine schmale Fläche hinaus.
-  C++-Regression verlangt 62 statt 10.000 Kachelbesuche und unveränderte Bildausgabe.
+  C++-Regression verlangt 124 statt 10.000 Kachelbesuche und unveränderte Bildausgabe.
   Die weitere Qt-/Sanitizer-Prüfung erfolgt im PR-Workflow.
 
 Die große Datei lässt sich mit dem lokal installierten FreeCAD 1.0 nicht vollständig

@@ -144,12 +144,12 @@ static void tileRanges()
     batch.forEachPaintedTile(painter, &option, [&](QPointF) { ++unclipped; });
     painter.setClipRect(QRectF(15, 30, 1, 800));
     batch.forEachPaintedTile(painter, &option, [&](QPointF) { ++clipped; });
-    CHECK(unclipped == 10000 && clipped == 62);
+    CHECK(unclipped == 10000 && clipped == 124); // includes the two-device-pixel AA margin
     painter.setClipRect(QRectF());
     clipped = 0;
     batch.forEachPaintedTile(painter, &option, [&](QPointF) { ++clipped; });
     CHECK(clipped == 0);
-    std::cout << "PASS SVG parent clip: 62 instead of 10000 tile visits; empty clip skips all\n";
+    std::cout << "PASS SVG parent clip: 124 instead of 10000 tile visits; empty clip skips all\n";
     std::cout << "PASS SVG ranges: 400 reference grids, limits, reset, invalid size, huge grid\n";
 }
 

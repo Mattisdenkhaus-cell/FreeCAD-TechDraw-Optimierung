@@ -37,8 +37,17 @@ auch SVG-Schnittansicht, Wiederöffnung und Export. Kein neuer C++-Fehler belegt
 der einfache Schnitt reproduziert die Verzögerung der großen Referenzdatei nicht.
 Commits: `ccfc493` (Qt 6), `06ec5d2` (Schnitttest mit Phasenprotokoll).
 Die Hauptursache der langen ersten Öffnung bleibt offen; keine vollständige
-Behebung behaupten. Nächster Schritt: freigegebenen optimierten Vollbuild mit zwei
-parallelen Prozessen starten, Lauf hier festhalten und keinen Doppelbuild auslösen.
+Behebung behaupten.
+
+Der freigegebene Vollbuild ist am 19. Oktober gestartet:
+[39239511388](https://github.com/Mattisdenkhaus-cell/FreeCAD-TechDraw-Optimierung/actions/runs/39239511388),
+Commit `5031aa60aac66ea5782b04327957475a588d860c`, `mode=full-build`,
+`variant=optimized`, `confirm_long_build=true`, `parallel_jobs=2`.
+Bei Fortsetzung zuerst diesen Lauf prüfen, keinen Doppelbuild starten. Nach Erfolg
+den erweiterten kurzen Artefakttest (`mode=validate-artifact`,
+`artifact_run=39239511388`) ausführen und erst dann das neue Paket zum Testen verlinken.
+Qt-/Python-CI des Code-Stands `06ec5d2` ist zusätzlich in `39239185031` grün;
+`5031aa6` ergänzt ausschließlich die dokumentierten Prüfergebnisse.
 
 1. Quellcodeanalyse der angefragten Komponenten abgeschlossen.
 2. Gemeinsamer C++-Patch mit Kanten-Cache, Rechtecktransformationen,

@@ -5,6 +5,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 
@@ -13,6 +14,7 @@ sys.path.insert(0, str(ROOT / 'benchmarks'))
 sys.path.insert(0, str(ROOT / 'scripts'))
 from compare import CONDITIONS, compare
 from techdraw_bench import summary
+from interactive_test import projection_snapshot
 import apply_optimizations
 from apply_optimizations import apply
 
@@ -48,6 +50,26 @@ class SummaryTests(unittest.TestCase):
         b['samples_ms']['zoom'][0] = float('nan')
         with self.assertRaisesRegex(ValueError, 'Invalid timing'):
             compare(a, b)
+
+
+class ProjectionSnapshotTests(unittest.TestCase):
+    def test_groups_missing_geometry_and_cycles(self):
+        def missing_edge(index):
+            raise ValueError('projection pending')
+        view = SimpleNamespace(Name='View', TypeId='TechDraw::DrawProjGroupItem',
+                               State=['Up-to-date'], isDerivedFrom=lambda _: True,
+                               getEdgeByIndex=lambda _: SimpleNamespace(isNull=lambda: False))
+        section = SimpleNamespace(Name='Section', TypeId='TechDraw::DrawViewSection',
+                                  State=['Up-to-date'], isDerivedFrom=lambda _: True,
+                                  getEdgeByIndex=missing_edge)
+        group = SimpleNamespace(Name='Group', Views=[view], isDerivedFrom=lambda _: False)
+        group.Views.append(group)
+        rows = projection_snapshot(SimpleNamespace(Views=[group, section, view]))
+        self.assertEqual({row['name'] for row in rows}, {'View', 'Section'})
+        by_name = {row['name']: row for row in rows}
+        self.assertTrue(by_name['View']['first_edge_available'])
+        self.assertFalse(by_name['Section']['first_edge_available'])
+        self.assertIn('projection pending', by_name['Section']['edge_error'])
 
 
 class PatchSafetyTests(unittest.TestCase):

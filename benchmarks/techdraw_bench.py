@@ -36,8 +36,10 @@ class Runner:
         self.page = self.doc.getObject(page_name) if page_name else (pages[0] if pages else None)
         if self.page is None or self.page.TypeId != 'TechDraw::DrawPage':
             raise RuntimeError('No TechDraw page found.')
-        Gui.activeDocument().getObject(self.page.Name).show()
-        Gui.updateGui()
+        # The copy launcher has already displayed and flushed this exact page.
+        if not config.get('page_already_shown', False):
+            Gui.activeDocument().getObject(self.page.Name).show()
+            Gui.updateGui()
         mdi = Gui.getMainWindow().findChild(QtWidgets.QMdiArea)
         window = mdi.activeSubWindow() if mdi else None
         views = window.findChildren(QtWidgets.QGraphicsView) if window else []

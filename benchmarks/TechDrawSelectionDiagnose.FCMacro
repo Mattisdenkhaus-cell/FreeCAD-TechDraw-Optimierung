@@ -38,8 +38,10 @@ class Runner:
         self.page = self.doc.getObject(page_name) if page_name else (pages[0] if pages else None)
         if self.page is None or self.page.TypeId != 'TechDraw::DrawPage':
             raise RuntimeError('No TechDraw page found.')
-        Gui.activeDocument().getObject(self.page.Name).show()
-        Gui.updateGui()
+        # The copy launcher has already displayed and flushed this exact page.
+        if not config.get('page_already_shown', False):
+            Gui.activeDocument().getObject(self.page.Name).show()
+            Gui.updateGui()
         mdi = Gui.getMainWindow().findChild(QtWidgets.QMdiArea)
         window = mdi.activeSubWindow() if mdi else None
         views = window.findChildren(QtWidgets.QGraphicsView) if window else []
@@ -242,11 +244,37 @@ def start():
 from datetime import datetime
 from pathlib import Path
 import json
+import hashlib
 import shutil
 import tempfile
 import time
 import uuid
 
+
+
+def projection_snapshot(page):
+    """Read public projection state, including projection-group children.
+
+    A first edge is evidence of geometry, not proof that face extraction has ended.
+    """
+    pending = list(page.Views)
+    seen, result = set(), []
+    while pending:
+        view = pending.pop(0)
+        if view.Name in seen:
+            continue
+        seen.add(view.Name)
+        pending.extend(getattr(view, 'Views', []))
+        if not view.isDerivedFrom('TechDraw::DrawViewPart'):
+            continue
+        row = {'name': view.Name, 'type': view.TypeId, 'state': list(view.State)}
+        try:
+            row['first_edge_available'] = not view.getEdgeByIndex(1).isNull()
+        except Exception as error:
+            row['first_edge_available'] = False
+            row['edge_error'] = f'{type(error).__name__}: {error}'
+        result.append(row)
+    return result
 
 
 def start_interactive(selection_diagnostics=False):
@@ -284,17 +312,33 @@ def start_interactive(selection_diagnostics=False):
     copy_name = None
     progress = None
     preparation = {}
+    output = None
+    preparing = True
+    trace = {'status': 'preparing', 'stage': 'initialize', 'page': page_name,
+             'freecad': App.Version(), 'qt': QtCore.qVersion(),
+             'freecad_home': App.getHomePath(), 'preparation_ms': preparation}
+
+    def checkpoint(stage):
+        trace['stage'] = stage
+        trace['elapsed_ms'] = (time.perf_counter_ns() - started) / 1e6
+        if preparing and output is not None:
+            output.write_text(json.dumps(trace, indent=2), encoding='utf-8')
 
     def prepare(phase, callback):
+        checkpoint(phase)
         before = time.perf_counter_ns()
-        value = callback()
-        preparation[phase] = (time.perf_counter_ns() - before) / 1e6
+        try:
+            value = callback()
+        finally:
+            preparation[phase] = (time.perf_counter_ns() - before) / 1e6
+            checkpoint(phase)
         return value
 
     def cleanup():
         # Only the document opened by this invocation may be discarded.
         if copy_name is not None and copy_name in App.listDocuments():
             Gui.getDocument(copy_name).Modified = False
+            checkpoint('close_copy')  # FreeCAD may wait for running projection workers here.
             App.closeDocument(copy_name)
         if original_name in App.listDocuments():
             App.setActiveDocument(original_name)
@@ -378,6 +422,16 @@ def start_interactive(selection_diagnostics=False):
                 'Zeichnung in beiden Versionen testen und die JSON-Dateien aufbewahren.')
 
     try:
+        downloads = QtCore.QStandardPaths.writableLocation(QtCore.QStandardPaths.DownloadLocation)
+        output_dir = Path(downloads) if downloads else Path.home() / 'Downloads'
+        output_dir.mkdir(parents=True, exist_ok=True)
+        output = output_dir / f'TechDraw-{datetime.now():%Y%m%d-%H%M%S}-{uuid.uuid4().hex[:8]}.json'
+        checkpoint('initialize')
+        try:
+            import Part
+            trace['occ'] = Part.OCC_VERSION
+        except (ImportError, AttributeError):
+            trace['occ'] = None
         progress = QtWidgets.QProgressDialog(
             'Temporäre Testkopie wird vorbereitet …', 'Abbrechen', 0, 66, parent)
         progress.setWindowTitle(title)
@@ -396,17 +450,32 @@ def start_interactive(selection_diagnostics=False):
         else:
             # saveCopy includes unsaved edits without renaming/saving the original document.
             prepare('save_unsaved_snapshot', lambda: original.saveCopy(str(copy_path)))
+        trace['copy_mode'] = 'saved-file' if saved_source else 'unsaved-snapshot'
+        trace['fixture_sha256'] = hashlib.sha256(copy_path.read_bytes()).hexdigest()
         copy_doc = prepare('open_copy', lambda: App.openDocument(str(copy_path)))
         copy_name = copy_doc.Name
+        trace['document_object_count'] = len(copy_doc.Objects)
+        trace['invalid_objects'] = [o.Name for o in copy_doc.Objects if 'Invalid' in o.State]
         prepare('recompute_copy', copy_doc.recompute)
         copy_page = copy_doc.getObject(page_name)
         projected = next((v for v in copy_page.Views
                           if v.isDerivedFrom('TechDraw::DrawViewPart')), None)
         timer = QtCore.QElapsedTimer()
         timer.start()
+        last_snapshot = -1000
         while projected is not None:
+            elapsed = timer.elapsed()
+            if elapsed - last_snapshot >= 1000:
+                trace['projection_state'] = projection_snapshot(copy_page)
+                preparation['wait_projection'] = elapsed
+                checkpoint('wait_projection')
+                last_snapshot = elapsed
             if progress.wasCanceled():
+                trace['status'] = 'cancelled'
+                trace['error'] = 'Vorbereitung vom Benutzer abgebrochen.'
+                checkpoint('wait_projection')
                 cleanup()
+                checkpoint('cancelled')
                 return None
             try:
                 if not projected.getEdgeByIndex(1).isNull():
@@ -414,29 +483,33 @@ def start_interactive(selection_diagnostics=False):
             except ValueError:
                 pass
             if timer.elapsed() > 60000:
-                raise RuntimeError('Die Testansicht hat nach 60 Sekunden noch keine projizierte Kante.')
+                raise RuntimeError(f'Die Testansicht {projected.Name} hat nach 60 Sekunden noch keine '
+                                   'projizierte Kante. Die Vorbereitung wurde protokolliert.')
             loop = QtCore.QEventLoop()
             QtCore.QTimer.singleShot(20, loop.quit)
             loop.exec_()
         preparation['wait_projection'] = timer.elapsed()
+        trace['projection_state'] = projection_snapshot(copy_page)
         App.setActiveDocument(copy_name)
         prepare('show_page', Gui.getDocument(copy_name).getObject(page_name).show)
         prepare('initial_gui_update', Gui.updateGui)
         # Recomputing the disposable copy may mark it modified. The original and
         # the copied input bytes remain untouched; only this temporary GUI flag resets.
         Gui.getDocument(copy_name).Modified = False
-        downloads = QtCore.QStandardPaths.writableLocation(QtCore.QStandardPaths.DownloadLocation)
-        output_dir = Path(downloads) if downloads else Path.home() / 'Downloads'
-        output_dir.mkdir(parents=True, exist_ok=True)
-        output = output_dir / f'TechDraw-{datetime.now():%Y%m%d-%H%M%S}-{uuid.uuid4().hex[:8]}.json'
         runner = prepare('initialize_runner', lambda: InteractiveRunner(App, Gui, QtCore, QtWidgets,
                                    {'page': page_name, 'label': 'automatic-copy', 'output': str(output),
+                                    'page_already_shown': True,
                                     'warmup': 1 if selection_diagnostics else 3,
                                     'repeats': 3 if selection_diagnostics else 10,
                                     'selection_diagnostics': selection_diagnostics}))
         runner.result['source_label'] = original.Label
         runner.result['freecad_home'] = App.getHomePath()
         runner.result['copy_mode'] = 'saved-file' if saved_source else 'unsaved-snapshot'
+        trace['status'] = 'prepared'
+        checkpoint('prepared')
+        # Runner owns this same output after setup; cleanup must not overwrite it.
+        preparing = False
+        runner.result['preparation_diagnostic'] = dict(trace)
         runner.total_steps = len(runner.samples) * (runner.warmup + runner.repeats) + 1
         runner.completed_steps = 0
         progress.setMaximum(runner.total_steps)
@@ -446,11 +519,24 @@ def start_interactive(selection_diagnostics=False):
         App._techdraw_test_runner = runner.start()
         return runner
     except Exception as error:
+        trace['status'] = 'failed'
+        trace['error'] = f'{type(error).__name__}: {error}'
+        trace['failed_stage'] = trace['stage']
+        try:
+            checkpoint(trace['stage'])  # Persist BEFORE cleanup can wait for workers.
+        except OSError:
+            pass
         try:
             cleanup()
         except Exception as cleanup_error:
+            trace['cleanup_error'] = str(cleanup_error)
             error = RuntimeError(f'{error}\nAufräumen: {cleanup_error}')
-        QtWidgets.QMessageBox.critical(parent, title, f'Test konnte nicht gestartet werden:\n{error}')
+        try:
+            checkpoint('failed')
+        except OSError:
+            pass
+        report_path = f'\n\nDiagnose: {output}' if output is not None and output.is_file() else ''
+        QtWidgets.QMessageBox.critical(parent, title, f'Test konnte nicht gestartet werden:\n{error}{report_path}')
         return None
 
 

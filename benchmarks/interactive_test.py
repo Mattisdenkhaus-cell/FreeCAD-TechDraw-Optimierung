@@ -186,8 +186,8 @@ def start_interactive(selection_diagnostics=False):
         # Recomputing the disposable copy may mark it modified. The original and
         # the copied input bytes remain untouched; only this temporary GUI flag resets.
         Gui.getDocument(copy_name).Modified = False
-        documents = QtCore.QStandardPaths.writableLocation(QtCore.QStandardPaths.DocumentsLocation)
-        output_dir = Path(documents or App.getUserAppDataDir()) / 'TechDrawTests'
+        downloads = QtCore.QStandardPaths.writableLocation(QtCore.QStandardPaths.DownloadLocation)
+        output_dir = Path(downloads) if downloads else Path.home() / 'Downloads'
         output_dir.mkdir(parents=True, exist_ok=True)
         output = output_dir / f'TechDraw-{datetime.now():%Y%m%d-%H%M%S}-{uuid.uuid4().hex[:8]}.json'
         runner = prepare('initialize_runner', lambda: InteractiveRunner(App, Gui, QtCore, QtWidgets,

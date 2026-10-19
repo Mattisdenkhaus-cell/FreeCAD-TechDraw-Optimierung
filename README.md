@@ -94,7 +94,7 @@ ist mit allen fünf Prüfgruppen bestanden (Qt offscreen; Details unter Validier
 Für den einfachen Einstieg gibt es das eigenständige
 [Testmakro TechDrawTest.FCMacro](benchmarks/TechDrawTest.FCMacro): eine Datei,
 nur das Zeichnungsblatt auswählen. Eine temporäre Testkopie wird automatisch
-erstellt; die Ergebnisse landen unter `Dokumente/TechDrawTests`.
+erstellt; die Ergebnisse landen unter `Downloads`.
 
 [Quellcodeanalyse](docs/ANALYSE.md) · [Technische Entscheidungen](docs/TECHNIK.md) ·
 [Benchmark-Anleitung](benchmarks/README.md) · [Fortsetzungsstand](docs/FORTSETZUNG.md)

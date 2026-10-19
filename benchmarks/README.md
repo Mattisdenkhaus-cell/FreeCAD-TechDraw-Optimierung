@@ -15,9 +15,10 @@ lässt sich damit nicht sofort unterbrechen.
 
 Pro Aktion werden drei Aufwärmschritte und zehn Messschritte ausgeführt. Am Ende
 erscheinen Median und p95 in Millisekunden. Die JSON-Datei landet automatisch unter
-**Dokumente/TechDrawTests**, mit eindeutigem Dateinamen; der genaue Pfad erscheint im
-Ergebnisdialog. Falls kein Dokumente-Ordner ermittelt werden kann, wird der
-FreeCAD-Benutzerdatenordner verwendet. Fehlende Bemaßung oder fehlender Scrollbereich
+**Downloads**, mit eindeutigem Dateinamen; der genaue Pfad erscheint im
+Ergebnisdialog. Die JSON-Datei liegt direkt im Downloadordner, ohne Unterordner.
+Qt ermittelt auch einen unter Windows verschobenen Downloadordner; falls kein Pfad
+verfügbar ist, wird `Downloads` im Benutzerverzeichnis verwendet. Fehlende Bemaßung oder fehlender Scrollbereich
 werden als unvollständige Messung angezeigt.
 
 Für vergleichbare Läufe dieselbe **gespeicherte, unveränderte Zeichnung** in beiden
@@ -58,7 +59,7 @@ Die JSON-Datei enthält zusätzlich:
 Zuerst in der langsamen Installation ausführen; für Versionsvergleiche dieselbe
 gespeicherte, unveränderte FCStd-Datei in beiden Installationen verwenden. Das Makro
 ändert keine Performance-Einstellungen. Die Kopie schützt das Original wie beim
-vollständigen Test. Ergebnisse liegen wieder unter **Dokumente/TechDrawTests**.
+vollständigen Test. Ergebnisse liegen wieder unter **Downloads**.
 
 Die getrennten Zeiten grenzen die Verzögerung ein; sie ersetzen kein C++-Profiling.
 Die Diagnose prüft die Auswahl-API, keine tatsächliche Mausauswahl oder Rastervorschau.

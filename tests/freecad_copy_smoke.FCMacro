@@ -45,7 +45,7 @@ try:
     import hashlib, json
     dialogs = []
     QtWidgets.QInputDialog.getItem = lambda parent, title, prompt, items, *args: (items[0], True)
-    QtCore.QStandardPaths.writableLocation = lambda *args: str(root / 'documents')
+    QtCore.QStandardPaths.writableLocation = lambda *args: str(root / 'downloads')
     def message(parent, title, text):
         dialogs.append(text)
         root.joinpath('dialogs.txt').write_text('\n\n'.join(dialogs))

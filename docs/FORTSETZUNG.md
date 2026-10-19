@@ -59,7 +59,7 @@ bleibt der PR ein Entwurf und die Navigationserweiterung standardmäßig aus.
   Funktions-/Exportcheckliste aus `benchmarks/README.md` abarbeiten.
   Das neue eigenständige `benchmarks/TechDrawTest.FCMacro` ermöglicht einen ersten
   Messlauf mit reiner Seitenauswahl: automatische temporäre Dokumentkopie,
-  JSON-Speicherung unter `Dokumente/TechDrawTests`, kein manuelles Kopieren nötig.
+  JSON-Speicherung unter `Downloads`, kein manuelles Kopieren nötig.
 - Große reale Zeichnungen mit und ohne SVG-Schraffuren messen; erst dann Aussagen
   über die Verbesserung der tatsächlichen Bearbeitungsperformance treffen.
 

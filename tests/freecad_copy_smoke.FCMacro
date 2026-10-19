@@ -1,0 +1,187 @@
+# Integration smoke test: run in a separate FreeCAD process with isolated settings.
+# Success is recorded in verified.json; failures in error.txt. Linux/Qt offscreen supported.
+import FreeCAD as App
+import FreeCADGui as Gui
+import Part
+from PySide import QtCore, QtGui
+from pathlib import Path
+import tempfile
+import traceback
+try:
+    from PySide import QtWidgets
+except ImportError:
+    QtWidgets = QtGui
+root = Path(tempfile.mkdtemp(prefix='techdraw-copy-smoke-'))
+App.Console.PrintMessage(f'Copy smoke evidence: {root}\n')
+try:
+    doc = App.newDocument('BenchmarkSmoke')
+    box = doc.addObject('Part::Box', 'Box')
+    box.Length = 50
+    box.Width = 30
+    box.Height = 10
+    page = doc.addObject('TechDraw::DrawPage', 'Page')
+    template = doc.addObject('TechDraw::DrawSVGTemplate', 'Template')
+    svg = root / 'blank.svg'
+    svg.write_text('<svg xmlns="http://www.w3.org/2000/svg" width="297mm" height="210mm" viewBox="0 0 297 210"></svg>')
+    template.Template = str(svg)
+    page.Template = template
+    view = doc.addObject('TechDraw::DrawViewPart', 'View')
+    view.Source = [box]
+    page.addView(view)
+    view.X = 100
+    view.Y = 100
+    doc.recompute()
+    dimension = doc.addObject('TechDraw::DrawViewDimension', 'Dimension')
+    dimension.Type = 'Distance'
+    dimension.References2D = [(view, 'Edge1')]
+    page.addView(dimension)
+    dimension.X = 15
+    dimension.Y = 25
+    doc.recompute()
+    Gui.activeDocument().getObject('Page').show()
+    Gui.updateGui()
+    doc.saveAs(str(root / 'fixture.FCStd'))
+    Gui.activeDocument().Modified = False  # smoke fixture created by this process only
+    import hashlib, json
+    dialogs = []
+    QtWidgets.QInputDialog.getItem = lambda parent, title, prompt, items, *args: (items[0], True)
+    QtCore.QStandardPaths.writableLocation = lambda *args: str(root / 'downloads')
+    def message(parent, title, text):
+        dialogs.append(text)
+        root.joinpath('dialogs.txt').write_text('\n\n'.join(dialogs), encoding='utf-8')
+        return QtWidgets.QMessageBox.Ok
+    QtWidgets.QMessageBox.information = message
+    QtWidgets.QMessageBox.warning = message
+    QtWidgets.QMessageBox.critical = message
+    macro = Path(__file__).resolve().parents[1] / 'benchmarks/TechDrawTest.FCMacro'
+    cases = iter(['saved', 'selection_existing', 'selection_existing_cancel',
+                  'unsaved', 'cancel', 'selection_diagnostic', 'open_failure'])
+    reports = []
+    def snapshot():
+        return {'filename': doc.FileName, 'modified': Gui.getDocument(doc.Name).Modified,
+                'undo': doc.UndoCount, 'x': doc.Dimension.X.Value, 'box_length': doc.Box.Length.Value,
+                'file_hash': hashlib.sha256(Path(doc.FileName).read_bytes()).hexdigest(),
+                'objects': [(o.Name, list(o.State)) for o in doc.Objects],
+                'selection': [(s.DocumentName, s.ObjectName, list(s.SubElementNames))
+                              for s in Gui.Selection.getSelectionEx()]}
+    def fail():
+        root.joinpath('error.txt').write_text(traceback.format_exc(), encoding='utf-8')
+        for name in list(App.listDocuments()):
+            Gui.getDocument(name).Modified = False
+            App.closeDocument(name)
+        Gui.getMainWindow().close()
+    def next_case():
+        try:
+            case = next(cases)
+        except StopIteration:
+            root.joinpath('verified.json').write_text(json.dumps(reports, indent=2))
+            Gui.getDocument(doc.Name).Modified = False
+            App.closeDocument(doc.Name)
+            Gui.getMainWindow().close()
+            return
+        try:
+            if case in ('selection_existing', 'selection_existing_cancel'):
+                Gui.getDocument(doc.Name).getObject('Page').show()
+                Gui.updateGui()
+                doc.save()
+                Gui.getDocument(doc.Name).Modified = False
+            if case == 'unsaved':
+                doc.openTransaction('Unsaved user edit')
+                doc.Dimension.X = 42
+                doc.commitTransaction()
+            Gui.Selection.clearSelection()
+            Gui.Selection.addSelection(doc.Name, 'Box')
+            before = snapshot()
+            selected_macro = (macro.with_name('TechDrawSelectionDiagnose.FCMacro')
+                              if case in ('selection_diagnostic', 'selection_existing', 'selection_existing_cancel') else macro)
+            namespace = {'__name__': '__main__', '__file__': str(selected_macro)}
+            if case == 'open_failure':
+                previous_outputs = set(root.joinpath('downloads').glob('*.json'))
+                open_document = App.openDocument
+                def fail_open(*args, **kwargs):
+                    # A checkpoint must already exist when an expensive call begins.
+                    outputs = set(root.joinpath('downloads').glob('*.json')) - previous_outputs
+                    assert len(outputs) == 1
+                    recorded = json.loads(next(iter(outputs)).read_text())
+                    assert recorded['stage'] == 'open_copy', recorded
+                    raise RuntimeError('Simulated document load failure')
+                App.openDocument = fail_open
+                try:
+                    exec(compile(selected_macro.read_text(encoding='utf-8'), str(selected_macro), 'exec'), namespace)
+                finally:
+                    App.openDocument = open_document
+                assert namespace['TECHDRAW_TEST_RUNNER'] is None
+                outputs = set(root.joinpath('downloads').glob('*.json')) - previous_outputs
+                result = json.loads(next(iter(outputs)).read_text())
+                assert result['status'] == 'failed' and result['failed_stage'] == 'open_copy', result
+                assert 'Simulated document load failure' in result['error'], result
+                assert snapshot() == before
+                assert list(App.listDocuments()) == [doc.Name]
+                reports.append({'case': case, 'original_preserved': True, 'failure_report_saved': True})
+                QtCore.QTimer.singleShot(0, next_case)
+                return
+            exec(compile(selected_macro.read_text(encoding='utf-8'), str(selected_macro), 'exec'), namespace)
+            runner = namespace['TECHDRAW_TEST_RUNNER']
+            assert runner is not None, dialogs
+            copied_name = runner.doc.Name
+            existing = case in ('selection_existing', 'selection_existing_cancel')
+            assert (copied_name == doc.Name) == existing
+            if case == 'unsaved':
+                assert runner.doc.Dimension.X.Value == 42
+            if case in ('cancel', 'selection_existing_cancel'):
+                progress = Gui.getMainWindow().findChildren(QtWidgets.QProgressDialog)[-1]
+                progress.cancel()
+            def check():
+                try:
+                    if not runner.finished or not runner.output.exists() or (not existing and copied_name in App.listDocuments()):
+                        QtCore.QTimer.singleShot(100, check)
+                        return
+                    result = json.loads(runner.output.read_text())
+                    # finish() sets its reentry guard before updateGui(); the
+                    # direct document stays open, so wait for the final report too.
+                    if existing and 'lifecycle_ms' not in result:
+                        QtCore.QTimer.singleShot(100, check)
+                        return
+                    assert snapshot() == before, (before, snapshot())
+                    assert App.ActiveDocument.Name == doc.Name
+                    assert existing or copied_name not in App.listDocuments()
+                    assert not result.get('restore_error'), result
+                    if case in ('cancel', 'selection_existing_cancel'):
+                        assert 'abgebrochen' in result['error'], result
+                    elif case in ('selection_diagnostic', 'selection_existing'):
+                        assert not result.get('error'), result
+                        assert list(result['samples_ms']) == ['edge_selection'], result
+                        assert result['summary']['edge_selection']['count'] == 3, result
+                        assert len(result['selection_warmup']) == 1, result
+                        assert len(result['selection_phases_ms']) == 3, result
+                        for phases in result['selection_phases_ms']:
+                            assert set(phases) == {'clear_selection', 'add_selection',
+                                                   'verify_selection', 'gui_update', 'viewport_repaint'}
+                            assert all(value >= 0 for value in phases.values())
+                        assert result['lifecycle_ms']['total_after_page_choice'] >= result['lifecycle_ms']['run_including_restore']
+                        assert result['diagnostics']['open_document_count'] == (1 if existing else 2)
+                        trace = result['preparation_diagnostic']
+                        assert trace['status'] == 'prepared' and trace['stage'] == 'prepared', trace
+                        assert trace['projection_state'][0]['first_edge_available'], trace
+                        assert trace['fixture_sha256'] == result['fixture_sha256']
+                        if existing:
+                            assert result['copy_mode'] == 'existing-document'
+                            assert not {'open_copy', 'recompute_copy', 'copy_saved_file'} & trace['preparation_ms'].keys()
+                    else:
+                        assert not result.get('error'), result
+                        assert all(v['count'] == 10 for v in result['summary'].values()), result
+                    reports.append({'case': case, 'original_preserved': True, 'copy_closed': not existing,
+                                    'mode': result['copy_mode'], 'output': str(runner.output)})
+                    QtCore.QTimer.singleShot(0, next_case)
+                except Exception:
+                    fail()
+            QtCore.QTimer.singleShot(100, check)
+        except Exception:
+            fail()
+    QtCore.QTimer.singleShot(0, next_case)
+except Exception:
+    root.joinpath('error.txt').write_text(traceback.format_exc())
+    if App.ActiveDocument:
+        Gui.activeDocument().Modified = False
+        App.closeDocument(App.ActiveDocument.Name)
+    QtCore.QTimer.singleShot(0, Gui.getMainWindow().close)

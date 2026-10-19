@@ -1,0 +1,842 @@
+diff --git a/src/Mod/TechDraw/Gui/EdgeGeometryCache.h b/src/Mod/TechDraw/Gui/EdgeGeometryCache.h
+new file mode 100644
+index 0000000..eab58d7
+--- /dev/null
++++ b/src/Mod/TechDraw/Gui/EdgeGeometryCache.h
+@@ -0,0 +1,51 @@
++// SPDX-License-Identifier: LGPL-2.1-or-later
++#ifndef TECHDRAWGUI_EDGEGEOMETRYCACHE_H
++#define TECHDRAWGUI_EDGEGEOMETRYCACHE_H
++
++#include <QPainterPath>
++#include <QPainterPathStroker>
++
++namespace TechDrawGui {
++
++// GUI-thread-only cache of the selection geometry, never of model geometry.
++// Keep a shared snapshot: even setPath() through QGraphicsPathItem is detected.
++// Qt compares shared QPainterPaths cheaply, and uses the same equality in setPath().
++class EdgeGeometryCache
++{
++public:
++    const QPainterPath& shape(const QPainterPath& path, qreal fuzz) const
++    {
++        refresh(path, fuzz);
++        return m_outline;
++    }
++
++    QRectF bounds(const QPainterPath& path, qreal fuzz) const
++    {
++        refresh(path, fuzz);
++        return m_bounds;
++    }
++
++private:
++    void refresh(const QPainterPath& path, qreal fuzz) const
++    {
++        if (m_valid && m_fuzz == fuzz && m_path == path) {
++            return;
++        }
++        QPainterPathStroker stroker;
++        stroker.setWidth(fuzz);
++        m_outline = stroker.createStroke(path);
++        m_bounds = m_outline.controlPointRect();
++        m_path = path;
++        m_fuzz = fuzz;
++        m_valid = true;
++    }
++
++    mutable QPainterPath m_path;
++    mutable QPainterPath m_outline;
++    mutable QRectF m_bounds;
++    mutable qreal m_fuzz{0};
++    mutable bool m_valid{false};
++};
++
++} // namespace TechDrawGui
++#endif
+diff --git a/src/Mod/TechDraw/Gui/NavigationPreview.h b/src/Mod/TechDraw/Gui/NavigationPreview.h
+new file mode 100644
+index 0000000..a2f749f
+--- /dev/null
++++ b/src/Mod/TechDraw/Gui/NavigationPreview.h
+@@ -0,0 +1,155 @@
++// SPDX-License-Identifier: LGPL-2.1-or-later
++#ifndef TECHDRAWGUI_NAVIGATIONPREVIEW_H
++#define TECHDRAWGUI_NAVIGATIONPREVIEW_H
++
++#include <QGraphicsScene>
++#include <QGraphicsView>
++#include <QImage>
++#include <QPainter>
++#include <QPointer>
++#include <QTimer>
++#include <cmath>
++
++namespace TechDrawGui {
++
++// GUI-thread-only, transient screen cache. Scene items and all geometry stay live.
++// QGraphicsScene::render and QGraphicsView::render never use this preview.
++class NavigationPreview : public QObject
++{
++public:
++    explicit NavigationPreview(QGraphicsView* view)
++        : QObject(view), m_view(view), m_scene(view->scene())
++    {
++        m_idle.setSingleShot(true);
++        m_idle.setInterval(120);
++        connect(&m_idle, &QTimer::timeout, this, [this] { invalidate(); });
++        if (m_scene) {
++            connect(m_scene, &QGraphicsScene::changed, this, [this] { invalidate(); });
++            connect(m_scene, &QGraphicsScene::selectionChanged, this, [this] { invalidate(); });
++            connect(m_scene, &QObject::destroyed, this, [this] { invalidate(); });
++        }
++    }
++
++    void invalidate()
++    {
++        const bool hadImage = !m_image.isNull();
++        m_idle.stop();
++        m_image = QImage();
++        if (hadImage)
++            m_view->viewport()->update(); // coalesced exact redraw, never synchronous repaint
++    }
++
++    bool begin()
++    {
++        if (!m_scene || m_view->scene() != m_scene || !m_view->isVisible() ||
++            !m_view->viewportTransform().isInvertible() ||
++            !m_view->viewport()->autoFillBackground())
++            return false;
++        const QBrush base = m_view->viewport()->palette().brush(m_view->viewport()->backgroundRole());
++        if (base.style() != Qt::SolidPattern || base.color().alpha() != 255)
++            return false;
++        if (!usable()) {
++            invalidate();
++            m_size = m_view->viewport()->size();
++            m_dpr = m_view->viewport()->devicePixelRatioF();
++            // One viewport plus 25% reserve on each side, bounded independently of scene size.
++            m_source = QRect(QPoint(), m_size).adjusted(-m_size.width() / 4, -m_size.height() / 4,
++                                                       m_size.width() / 4, m_size.height() / 4);
++            QSize pixels = rasterSize(m_source.size(), m_dpr);
++            if (pixels.isEmpty())
++                return false;
++            // Align the capture origin to physical pixels. An integer logical
++            // margin can otherwise introduce a second subpixel sampling at 125% DPI.
++            m_origin = QPointF(std::floor(m_source.x() * m_dpr) / m_dpr,
++                               std::floor(m_source.y() * m_dpr) / m_dpr);
++            pixels += QSize(1, 1); // room for the subpixel offset, also included in the budget
++            if (pixels.width() > 32768 || pixels.height() > 32768 ||
++                qint64(pixels.width()) * pixels.height() * 4 > maxBytes)
++                return false;
++            m_image = QImage(pixels, QImage::Format_RGB32);
++            if (m_image.isNull())
++                return false;
++            m_image.setDevicePixelRatio(m_dpr);
++            m_logicalDpi = QSize(m_view->viewport()->logicalDpiX(), m_view->viewport()->logicalDpiY());
++            m_image.setDotsPerMeterX(qRound(m_logicalDpi.width() / 0.0254));
++            m_image.setDotsPerMeterY(qRound(m_logicalDpi.height() / 0.0254));
++            // The widget backing store is opaque. RGB32 also preserves Qt's
++            // opaque-target text rasterization (ARGB can disable subpixel antialiasing).
++            m_image.fill(base.color());
++            m_transform = m_view->viewportTransform();
++            m_hints = m_view->renderHints();
++            m_baseBrush = base;
++            QPainter painter(&m_image);
++            painter.setRenderHints(m_hints);
++            // Match QWidget's erased backing store before the (possibly transparent)
++            // TechDraw background is painted. Never composite it twice over itself.
++            const QRectF target(QPointF(m_source.topLeft()) - m_origin, QSizeF(m_source.size()));
++            m_view->render(&painter, target, m_source, Qt::IgnoreAspectRatio);
++        }
++        m_idle.start();
++        return true;
++    }
++
++    bool paint(QPainter& painter)
++    {
++        if (!usable()) {
++            invalidate();
++            return false;
++        }
++        painter.save();
++        painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
++        painter.setWorldTransform(m_transform.inverted() * m_view->viewportTransform());
++        // Preserve the image's device-pixel ratio. Stretching its rounded physical
++        // dimensions back into m_source would distort fractional-DPI captures.
++        painter.drawImage(m_origin, m_image);
++        painter.restore();
++        return true;
++    }
++
++    bool active() const { return !m_image.isNull(); }
++    qint64 bytes() const { return m_image.sizeInBytes(); }
++    static constexpr qint64 maxBytes = 64 * 1024 * 1024;
++    static QSize rasterSize(const QSize& logical, qreal dpr)
++    {
++        const double width = std::ceil(logical.width() * dpr);
++        const double height = std::ceil(logical.height() * dpr);
++        if (!(dpr > 0 && width > 0 && height > 0) || width > 32768 || height > 32768 ||
++            width * height * 4 > maxBytes)
++            return {};
++        return QSize(static_cast<int>(width), static_cast<int>(height));
++    }
++
++private:
++    bool usable() const
++    {
++        if (m_image.isNull() || !m_scene || m_view->scene() != m_scene ||
++            m_size != m_view->viewport()->size() ||
++            m_logicalDpi != QSize(m_view->viewport()->logicalDpiX(), m_view->viewport()->logicalDpiY()) ||
++            m_dpr != m_view->viewport()->devicePixelRatioF() || m_hints != m_view->renderHints() ||
++            !m_view->viewport()->autoFillBackground() ||
++            m_baseBrush != m_view->viewport()->palette().brush(m_view->viewport()->backgroundRole()))
++            return false;
++        bool invertible = false;
++        const QTransform inverse = (m_transform.inverted() * m_view->viewportTransform())
++                                       .inverted(&invertible);
++        // Require complete coverage, even for rotation/shear; otherwise draw exact vectors.
++        return invertible && QRectF(m_source).contains(
++            inverse.mapRect(QRectF(QPointF(), QSizeF(m_size))));
++    }
++
++    QGraphicsView* m_view;
++    QPointer<QGraphicsScene> m_scene;
++    QTimer m_idle;
++    QImage m_image;
++    QRect m_source;
++    QPointF m_origin;
++    QSize m_size;
++    QSize m_logicalDpi;
++    qreal m_dpr = 1;
++    QTransform m_transform;
++    QPainter::RenderHints m_hints;
++    QBrush m_baseBrush;
++};
++
++} // namespace TechDrawGui
++#endif
+diff --git a/src/Mod/TechDraw/Gui/QGIBatchedSvgHatch.h b/src/Mod/TechDraw/Gui/QGIBatchedSvgHatch.h
+new file mode 100644
+index 0000000..2372fa7
+--- /dev/null
++++ b/src/Mod/TechDraw/Gui/QGIBatchedSvgHatch.h
+@@ -0,0 +1,181 @@
++// SPDX-License-Identifier: LGPL-2.1-or-later
++#ifndef TECHDRAWGUI_QGIBATCHEDSVGHATCH_H
++#define TECHDRAWGUI_QGIBATCHEDSVGHATCH_H
++
++#include <algorithm>
++#include <cmath>
++#include <QPainter>
++#include <QPointer>
++#include <QStyleOptionGraphicsItem>
++#include <QSvgRenderer>
++#include "QGCustomRect.h"
++
++namespace TechDrawGui {
++
++// The QGIFace owns the renderer. A guarded pointer also makes destruction safe.
++// One graphics item replaces the original column-major array of SVG child items.
++class QGIBatchedSvgHatch final : public QGCustomRect
++{
++public:
++    QGIBatchedSvgHatch()
++    {
++        setFlag(QGraphicsItem::ItemUsesExtendedStyleOption, true);
++    }
++
++    ~QGIBatchedSvgHatch() override { QObject::disconnect(m_repaintConnection); }
++
++    void resetTiles()
++    {
++        prepareGeometryChange();
++        QObject::disconnect(m_repaintConnection);
++        m_renderer.clear();
++        m_coverage = QRectF();
++        m_count = 0;
++        update();
++    }
++
++    void configureTiles(QSvgRenderer* renderer, int columns, int rows,
++                        qreal stepX, qreal stepY, QPointF origin, qreal scale, long maxTiles)
++    {
++        resetTiles();
++        if (!renderer || !renderer->isValid() || columns <= 0 || rows <= 0 ||
++            !std::isfinite(stepX) || !std::isfinite(stepY) ||
++            !std::isfinite(scale) || !std::isfinite(origin.x()) ||
++            !std::isfinite(origin.y()) || stepX <= 0 || stepY <= 0 || scale <= 0) {
++            return;
++        }
++        const QSize native = renderer->defaultSize();
++        const QSizeF tile(native.width() * scale, native.height() * scale);
++        if (tile.isEmpty() || !std::isfinite(tile.width()) || !std::isfinite(tile.height())) {
++            return;
++        }
++        // Original code creates a tile, then tests tileCount > maxTiles.
++        const qint64 total = qint64(columns) * rows;
++        const qint64 count = std::min(total - 1, qint64(std::max(0L, maxTiles))) + 1;
++        const int usedColumns = int((count - 1) / rows + 1);
++        const int usedRows = int(std::min(count, qint64(rows)));
++        const QSizeF coverage((usedColumns - 1) * stepX + tile.width(),
++                              (usedRows - 1) * stepY + tile.height());
++        if (!std::isfinite(coverage.width()) || !std::isfinite(coverage.height()) ||
++            !std::isfinite(origin.x() + coverage.width()) ||
++            !std::isfinite(origin.y() + coverage.height())) {
++            return;
++        }
++        prepareGeometryChange();
++        m_renderer = renderer;
++        m_repaintConnection = QObject::connect(renderer, &QSvgRenderer::repaintNeeded,
++                                               [this]() { update(); });
++        m_columns = usedColumns;
++        m_rows = rows;
++        m_count = count;
++        m_stepX = stepX;
++        m_stepY = stepY;
++        m_origin = origin;
++        m_scale = scale;
++        m_nativeSize = native;
++        m_tileSize = tile;
++        m_coverage = QRectF(origin, coverage);
++        update();
++    }
++
++    QRectF boundingRect() const override
++    {
++        return QGCustomRect::boundingRect().united(m_coverage);
++    }
++
++    // Keep upstream placement independent of the extra advertised tile coverage.
++    void centerAt(QPointF center) override { centerAt(center.x(), center.y()); }
++    void centerAt(double x, double y) override
++    {
++        const QRectF box = QGCustomRect::boundingRect();
++        setPos(x - box.width() / 2, y - box.height() / 2);
++    }
++
++    // Public to permit a Qt-only equivalence/complexity test without GUI bindings.
++    template<class Visitor>
++    void forEachVisibleTile(const QRectF& exposed, Visitor visit) const
++    {
++        if (!m_count || !exposed.intersects(m_coverage)) {
++            return;
++        }
++        // Inclusive conservative ranges, followed by the original intersection test.
++        // Clamp as floating point BEFORE converting to int, including extreme pans.
++        const auto index = [](qreal value, int size) {
++            return int(std::max(qreal(0), std::min(qreal(size - 1), value)));
++        };
++        const int x0 = index(std::floor((exposed.left() - m_origin.x() - m_tileSize.width()) / m_stepX), m_columns);
++        const int x1 = index(std::ceil((exposed.right() - m_origin.x()) / m_stepX), m_columns);
++        const int y0 = index(std::floor((exposed.top() - m_origin.y() - m_tileSize.height()) / m_stepY), m_rows);
++        const int y1 = index(std::ceil((exposed.bottom() - m_origin.y()) / m_stepY), m_rows);
++        for (int x = x0; x <= x1; ++x) {
++            const qint64 remaining = m_count - qint64(x) * m_rows;
++            const int lastRow = int(std::min(qint64(y1), remaining - 1));
++            for (int y = y0; y <= lastRow; ++y) {
++                const QPointF position(m_origin.x() + x * m_stepX, m_origin.y() + y * m_stepY);
++                if (QRectF(position, m_tileSize).intersects(exposed)) {
++                    visit(position);
++                }
++            }
++        }
++    }
++
++    template<class Visitor>
++    void forEachPaintedTile(const QPainter& painter, const QStyleOptionGraphicsItem* option,
++                            Visitor visit) const
++    {
++        QRectF exposed = option && option->exposedRect.isValid()
++            ? option->exposedRect : boundingRect();
++        // exposedRect describes the viewport, not necessarily the parent face clip.
++        // Narrow section faces otherwise render tiles hidden by ItemClipsChildrenToShape.
++        if (painter.hasClipping()) {
++            const QRectF clip = painter.clipBoundingRect();
++            if (clip.isEmpty())
++                return;
++            // Like QGraphicsView's antialias exposure margin, retain two device
++            // pixels around the clip. SVG strokes can extend beyond tile bounds;
++            // exact geometric clipping alone loses boundary pixels after rotation.
++            bool invertible = false;
++            const QTransform toDevice = painter.deviceTransform();
++            const QTransform fromDevice = toDevice.inverted(&invertible);
++            if (invertible) {
++                const QRectF padded = toDevice.mapRect(clip).adjusted(-2, -2, 2, 2);
++                exposed = exposed.intersected(fromDevice.mapRect(padded));
++            }
++        }
++        forEachVisibleTile(exposed, visit);
++    }
++
++    void paint(QPainter* painter, const QStyleOptionGraphicsItem* option,
++               QWidget* widget = nullptr) override
++    {
++        QGCustomRect::paint(painter, option, widget);
++        if (!m_renderer || !m_renderer->isValid()) {
++            return;
++        }
++        forEachPaintedTile(*painter, option, [&](const QPointF& position) {
++            // Match QGraphicsSvgItem's local transform, including cosmetic SVG strokes.
++            painter->save();
++            painter->translate(position);
++            painter->scale(m_scale, m_scale);
++            m_renderer->render(painter, QRectF(QPointF(), m_nativeSize));
++            painter->restore();
++        });
++    }
++
++private:
++    QPointer<QSvgRenderer> m_renderer;
++    QMetaObject::Connection m_repaintConnection;
++    QRectF m_coverage;
++    QPointF m_origin;
++    QSizeF m_nativeSize;
++    QSizeF m_tileSize;
++    int m_columns{0};
++    int m_rows{0};
++    qint64 m_count{0};
++    qreal m_stepX{0};
++    qreal m_stepY{0};
++    qreal m_scale{1};
++};
++
++} // namespace TechDrawGui
++#endif
+diff --git a/src/Mod/TechDraw/Gui/QGIEdge.cpp b/src/Mod/TechDraw/Gui/QGIEdge.cpp
+index e4bb49e..2449745 100644
+--- a/src/Mod/TechDraw/Gui/QGIEdge.cpp
++++ b/src/Mod/TechDraw/Gui/QGIEdge.cpp
+@@ -91,16 +91,12 @@ QColor QGIEdge::getHiddenColor()
+
+ QRectF QGIEdge::boundingRect() const
+ {
+-    return shape().controlPointRect();
++    return m_geometryCache.bounds(path(), getEdgeFuzz());
+ }
+
+ QPainterPath QGIEdge::shape() const
+ {
+-    QPainterPath outline;
+-    QPainterPathStroker stroker;
+-    stroker.setWidth(getEdgeFuzz());
+-    outline = stroker.createStroke(path());
+-    return outline;
++    return m_geometryCache.shape(path(), getEdgeFuzz());
+ }
+
+ void QGIEdge::mouseDoubleClickEvent(QGraphicsSceneMouseEvent *event)
+diff --git a/src/Mod/TechDraw/Gui/QGIEdge.h b/src/Mod/TechDraw/Gui/QGIEdge.h
+index 86d60a3..68eb395 100644
+--- a/src/Mod/TechDraw/Gui/QGIEdge.h
++++ b/src/Mod/TechDraw/Gui/QGIEdge.h
+@@ -27,6 +27,7 @@
+ #include <Mod/TechDraw/TechDrawGlobal.h>
+
+ #include "QGIPrimPath.h"
++#include "EdgeGeometryCache.h"
+ #include "QGIUserTypes.h"
+
+ namespace TechDrawGui
+@@ -69,6 +70,8 @@ protected:
+     QColor getHiddenColor();
+
+ private:
++    EdgeGeometryCache m_geometryCache;
++
+     int projIndex;                                                     //index of edge in Projection. must exist.
+
+     bool isCosmetic;
+diff --git a/src/Mod/TechDraw/Gui/QGIFace.cpp b/src/Mod/TechDraw/Gui/QGIFace.cpp
+index 5bf55e6..ae81db9 100644
+--- a/src/Mod/TechDraw/Gui/QGIFace.cpp
++++ b/src/Mod/TechDraw/Gui/QGIFace.cpp
+@@ -21,6 +21,7 @@
+  ***************************************************************************/
+
+ # include <cmath>
++# include <limits>
+
+ # include <QFileInfo>
+ # include <QGraphicsView>
+@@ -39,6 +40,11 @@
+ #include "QGIFace.h"
+ #include <QByteArrayMatcher>
+ #include "QGCustomRect.h"
++#include "QGIBatchedSvgHatch.h"
++
++#ifndef TECHDRAW_BATCH_SVG_HATCH
++#define TECHDRAW_BATCH_SVG_HATCH 1
++#endif
+ #include "QGCustomSvg.h"
+ #include "QGCustomImage.h"
+ #include "QGICMark.h"
+@@ -64,7 +70,11 @@ QGIFace::QGIFace(int index) :
+
+     m_texture = QPixmap();                      //empty texture
+
++#if TECHDRAW_BATCH_SVG_HATCH
++    m_svgHatchArea = new QGIBatchedSvgHatch();
++#else
+     m_svgHatchArea = new QGCustomRect();
++#endif
+     m_svgHatchArea->setParentItem(this);
+     m_imageSvgHatchArea = new QGCustomImage();
+     m_imageSvgHatchArea->setParentItem(this);
+@@ -275,15 +285,33 @@ void QGIFace::makeMark(double x, double y)  // NOLINT readability-identifier-len
+ /// make an array of svg tiles to cover this face
+ void QGIFace::buildSvgHatch()
+ {
++    // Rebuilds must not retain tiles from a previous hatch. Keep the A/B path safe too.
++#if TECHDRAW_BATCH_SVG_HATCH
++    static_cast<QGIBatchedSvgHatch*>(m_svgHatchArea)->resetTiles();
++#else
++    const auto oldTiles = m_svgHatchArea->childItems();
++    for (auto* tile : oldTiles) {
++        delete tile;
++    }
++#endif
+     double wTile = SVGSIZEW * m_fillScale;
+     double hTile = SVGSIZEH * m_fillScale;
+     double faceWidth = path().boundingRect().width();
+     double faceHeight = path().boundingRect().height();
+     double faceOverlaySize = Preferences::svgHatchFactor() * std::max(faceWidth, faceHeight);
+     QPointF faceCenter = path().boundingRect().center();
++    if (!std::isfinite(wTile) || !std::isfinite(hTile) || wTile <= 0 || hTile <= 0 ||
++        !std::isfinite(faceOverlaySize) || faceOverlaySize <= 0) {
++        return;
++    }
+     double tilesWide = ceil(faceOverlaySize / wTile);
+     double tilesHigh = ceil(faceOverlaySize / hTile);
+
++    if (tilesWide >= std::numeric_limits<int>::max() ||
++        tilesHigh >= std::numeric_limits<int>::max()) {
++        Base::Console().warning("SVG hatch grid exceeds integer range\n");
++        return;
++    }
+     double overlayWidth = tilesWide * wTile;
+     double overlayHeight = tilesHigh * hTile;
+     m_svgHatchArea->setRect(0., 0., overlayWidth,-overlayHeight);
+@@ -296,6 +324,15 @@ void QGIFace::buildSvgHatch()
+         Base::Console().message("QGIF::buildSvgHatch - failed to load svg string\n");
+         return;
+     }
++#if TECHDRAW_BATCH_SVG_HATCH
++    if (tilesWide * tilesHigh > qint64(std::max(0L, m_maxTile)) + 1) {
++        Base::Console().warning("SVG tile count exceeded. Change hatch scale or raise limit.\n");
++    }
++    static_cast<QGIBatchedSvgHatch*>(m_svgHatchArea)->configureTiles(
++        m_sharedRender, static_cast<int>(tilesWide), static_cast<int>(tilesHigh),
++        wTile, hTile, QPointF(getHatchOffset().x, -overlayWidth + getHatchOffset().y),
++        m_fillScale, m_maxTile);
++#else
+     long int tileCount = 0;
+     for (int iw = 0; iw < int(tilesWide); iw++) {
+         for (int ih = 0; ih < int(tilesHigh); ih++) {
+@@ -315,6 +352,7 @@ void QGIFace::buildSvgHatch()
+             break;
+         }
+     }
++#endif
+     QPointF faceCenterToMRect = mapToItem(m_svgHatchArea, faceCenter);
+     m_svgHatchArea->setTransformOriginPoint(faceCenterToMRect);
+     m_svgHatchArea->setRotation(m_hatchRotation);
+diff --git a/src/Mod/TechDraw/Gui/QGIView.cpp b/src/Mod/TechDraw/Gui/QGIView.cpp
+index 01684d4..a77ecca 100644
+--- a/src/Mod/TechDraw/Gui/QGIView.cpp
++++ b/src/Mod/TechDraw/Gui/QGIView.cpp
+@@ -800,7 +800,7 @@ QRectF QGIView::frameRect() const
+             child->type() != UserType::QGICMark  &&
+             child->type() != UserType::QGIViewDimension &&
+             child->type() != UserType::QGIViewBalloon) {
+-            QRectF childRect = mapFromItem(child, child->boundingRect()).boundingRect();
++            QRectF childRect = mapRectFromItem(child, child->boundingRect());
+             result = result.united(childRect);
+         }
+     }
+@@ -829,7 +829,7 @@ QRectF QGIView::customChildrenBoundingRect() const
+             // area defined by the edges as in frameRect()
+             // child->type() != UserType::QGIVertex &&
+             child->type() != UserType::QGICMark) {
+-            QRectF childRect = mapFromItem(child, child->boundingRect()).boundingRect();
++            QRectF childRect = mapRectFromItem(child, child->boundingRect());
+             result = result.united(childRect);
+         }
+     }
+diff --git a/src/Mod/TechDraw/Gui/QGIViewDimension.cpp b/src/Mod/TechDraw/Gui/QGIViewDimension.cpp
+index a275c82..a34e342 100644
+--- a/src/Mod/TechDraw/Gui/QGIViewDimension.cpp
++++ b/src/Mod/TechDraw/Gui/QGIViewDimension.cpp
+@@ -175,7 +175,16 @@ void QGIViewDimension::select(bool state)
+ void QGIViewDimension::hover(bool state)
+ {
+     hasHover = state;
+-    draw();
++    // Hover changes presentation only. Keep reference geometry and label placement intact.
++    if (datumLabel->isSelected()) {
++        setPrettySel();
++    }
++    else if (hasHover) {
++        setPrettyPre();
++    }
++    else {
++        setPrettyNormal();
++    }
+ }
+
+ void QGIViewDimension::setViewPartFeature(TechDraw::DrawViewDimension* obj)
+@@ -2320,6 +2329,9 @@ void QGIViewDimension::setPrettyPre()
+     aHead1->setPrettyPre();
+     aHead2->setPrettyPre();
+     dimLines->setPrettyPre();
++    aHead1->update();
++    aHead2->update();
++    dimLines->update();
+ }
+
+ void QGIViewDimension::setPrettySel()
+@@ -2327,6 +2339,9 @@ void QGIViewDimension::setPrettySel()
+     aHead1->setPrettySel();
+     aHead2->setPrettySel();
+     dimLines->setPrettySel();
++    aHead1->update();
++    aHead2->update();
++    dimLines->update();
+ }
+
+ void QGIViewDimension::setPrettyNormal()
+@@ -2334,6 +2349,9 @@ void QGIViewDimension::setPrettyNormal()
+     aHead1->setPrettyNormal();
+     aHead2->setPrettyNormal();
+     dimLines->setPrettyNormal();
++    aHead1->update();
++    aHead2->update();
++    dimLines->update();
+ }
+
+ void QGIViewDimension::drawBorder()
+@@ -2389,10 +2407,10 @@ double QGIViewDimension::getDefaultAsmeHorizontalLeaderLength() const
+ //frame, border, caption are never shown in QGIVD, so shouldn't be in bRect
+ QRectF QGIViewDimension::boundingRect() const
+ {
+-    QRectF labelRect = mapFromItem(datumLabel, datumLabel->boundingRect()).boundingRect();
+-    QRectF linesRect = mapFromItem(dimLines, dimLines->boundingRect()).boundingRect();
+-    QRectF aHead1Rect = mapFromItem(aHead1, aHead1->boundingRect()).boundingRect();
+-    QRectF aHead2Rect = mapFromItem(aHead2, aHead2->boundingRect()).boundingRect();
++    QRectF labelRect = mapRectFromItem(datumLabel, datumLabel->boundingRect());
++    QRectF linesRect = mapRectFromItem(dimLines, dimLines->boundingRect());
++    QRectF aHead1Rect = mapRectFromItem(aHead1, aHead1->boundingRect());
++    QRectF aHead2Rect = mapRectFromItem(aHead2, aHead2->boundingRect());
+     QRectF result(labelRect);
+     result = result.united(linesRect);
+     result = result.united(aHead1Rect);
+diff --git a/src/Mod/TechDraw/Gui/QGVNavStyle.cpp b/src/Mod/TechDraw/Gui/QGVNavStyle.cpp
+index 99d0ccd..4cac942 100644
+--- a/src/Mod/TechDraw/Gui/QGVNavStyle.cpp
++++ b/src/Mod/TechDraw/Gui/QGVNavStyle.cpp
+@@ -297,6 +297,8 @@ void QGVNavStyle::zoom(double factor)
+     }
+
+     setAnchor();
++    if (factor != 1.0)
++        getViewer()->beginNavigationPreview();
+     getViewer()->scale(factor, factor);
+     m_zoomPending = false;
+ }
+@@ -357,6 +359,8 @@ void QGVNavStyle::startPan(QPoint p)
+
+ void QGVNavStyle::pan(QPoint p)
+ {
++    if (p != panOrigin)
++        getViewer()->beginNavigationPreview();
+     QScrollBar* horizontalScrollbar = getViewer()->horizontalScrollBar();
+     QScrollBar* verticalScrollbar = getViewer()->verticalScrollBar();
+     QPoint direction = p - panOrigin;
+diff --git a/src/Mod/TechDraw/Gui/QGVPage.cpp b/src/Mod/TechDraw/Gui/QGVPage.cpp
+index 7188fd7..5c9a548 100644
+--- a/src/Mod/TechDraw/Gui/QGVPage.cpp
++++ b/src/Mod/TechDraw/Gui/QGVPage.cpp
+@@ -47,6 +47,7 @@
+ #include <Mod/TechDraw/App/DrawSVGTemplate.h>
+
+ #include "MDIViewPage.h"
++#include "NavigationPreview.h"
+ #include "PreferencesGui.h"
+ #include "QGSPage.h"
+ #include "QGVNavStyleBlender.h"
+@@ -145,6 +146,7 @@ QGVPage::QGVPage(ViewProviderPage* vpPage, QGSPage* scenePage, QWidget* parent)
+     setObjectName(QString::fromLocal8Bit(name));
+
+     setScene(scenePage);
++    m_navigationPreview = std::make_unique<NavigationPreview>(this);
+     setMouseTracking(true);
+     viewport()->setMouseTracking(true);
+
+@@ -257,6 +259,7 @@ void QGVPage::setNavigationStyle(std::string navParm)
+
+ void QGVPage::activateHandler(TechDrawHandler* newHandler)
+ {
++    m_navigationPreview->invalidate();
+     if (toolHandler) {
+         toolHandler->deactivate();
+     }
+@@ -275,6 +278,7 @@ void QGVPage::deactivateHandler()
+
+ void QGVPage::startBalloonPlacing(DrawView* parent)
+ {
++    m_navigationPreview->invalidate();
+     balloonPlacing = true;
+     m_balloonParent = parent;
+     activateCursor(
+@@ -289,7 +293,7 @@ void QGVPage::cancelBalloonPlacing()
+     resetCursor();
+ }
+
+-void QGVPage::drawBackground(QPainter* painter, const QRectF&)
++void QGVPage::drawBackground(QPainter* painter, const QRectF& rect)
+ {
+     //Note: Background is not part of scene()
+     if (!drawBkg)
+@@ -303,18 +307,14 @@ void QGVPage::drawBackground(QPainter* painter, const QRectF&)
+         return;
+     }
+
+-    painter->save();
+-    painter->resetTransform();
+-
+-    painter->setBrush(*bkgBrush);
+-    painter->drawRect(
+-        viewport()->rect().adjusted(-2, -2, 2, 2));//just bigger than viewport to prevent artifacts
+-
+-    painter->restore();
++    // Respect the supplied scene rectangle, also for partial paints and an overscan
++    // render target. Resetting to viewport coordinates draws borders into that target.
++    painter->fillRect(rect, *bkgBrush);
+ }
+
+ void QGVPage::setRenderer(RendererType type)
+ {
++    m_navigationPreview->invalidate();
+     m_renderer = type;
+
+     if (m_renderer == RendererType::OpenGL) {
+@@ -325,7 +325,10 @@ void QGVPage::setRenderer(RendererType type)
+     }
+     else {
+         setViewport(new QWidget);
+-        setViewportUpdateMode(QGraphicsView::FullViewportUpdate);
++        const bool partial = type == RendererType::Native &&
++            Preferences::getPreferenceGroup("General")->GetBool("PartialViewportUpdates", false);
++        setViewportUpdateMode(partial ? QGraphicsView::MinimalViewportUpdate
++                                      : QGraphicsView::FullViewportUpdate);
+     }
+ }
+
+@@ -340,6 +343,11 @@ void QGVPage::setHighQualityAntialiasing(bool highQualityAntialiasing)
+
+ void QGVPage::paintEvent(QPaintEvent* event)
+ {
++    if (m_renderer == RendererType::Native && m_navigationPreview->active()) {
++        QPainter painter(viewport());
++        if (m_navigationPreview->paint(painter))
++            return;
++    }
+     if (m_renderer == RendererType::Image) {
+         if (m_image.size() != viewport()->size()) {
+             m_image = QImage(viewport()->size(), QImage::Format_ARGB32_Premultiplied);
+@@ -381,6 +389,14 @@ void QGVPage::pseudoContextEvent()
+     }
+ }
+
++void QGVPage::beginNavigationPreview()
++{
++    if (m_renderer == RendererType::Native && !toolHandler && !balloonPlacing &&
++        Preferences::getPreferenceGroup("General")->GetBool("NavigationPreview", false)) {
++        m_navigationPreview->begin();
++    }
++}
++
+ void QGVPage::wheelEvent(QWheelEvent* event)
+ {
+     m_navStyle->handleWheelEvent(event);
+@@ -415,12 +431,14 @@ void QGVPage::keyReleaseEvent(QKeyEvent* event)
+
+ void QGVPage::focusOutEvent(QFocusEvent* event)
+ {
++    m_navigationPreview->invalidate();
+     Q_UNUSED(event);
+     m_navStyle->handleFocusOutEvent(event);
+ }
+
+ void QGVPage::kbPanScroll(int xMove, int yMove)
+ {
++    beginNavigationPreview();
+     if (xMove != 0) {
+         QScrollBar* hsb = horizontalScrollBar();
+         //        int hRange = hsb->maximum() - hsb->minimum();     //default here is 100?
+@@ -461,6 +479,7 @@ void QGVPage::leaveEvent(QEvent* event)
+
+ void QGVPage::mousePressEvent(QMouseEvent* event)
+ {
++    m_navigationPreview->invalidate();
+     if (toolHandler && (event->button() != Qt::MiddleButton)) {
+         toolHandler->mousePressEvent(event);
+     }
+@@ -557,6 +576,12 @@ void QGVPage::zoomOut()
+     m_navStyle->zoomOut();
+ }
+
++void QGVPage::showGrid(bool state)
++{
++    m_navigationPreview->invalidate();
++    m_showGrid = state;
++}
++
+ void QGVPage::drawForeground(QPainter* painter, const QRectF& rect)
+ {
+     Q_UNUSED(rect);
+@@ -571,6 +596,7 @@ void QGVPage::drawForeground(QPainter* painter, const QRectF& rect)
+
+ void QGVPage::makeGrid(int gridWidth, int gridHeight, double gridStep)
+ {
++    m_navigationPreview->invalidate();
+     QPainterPath grid;
+     double width = Rez::guiX(gridWidth);
+     double height = Rez::guiX(gridHeight);
+diff --git a/src/Mod/TechDraw/Gui/QGVPage.h b/src/Mod/TechDraw/Gui/QGVPage.h
+index aaa9d14..0ea422a 100644
+--- a/src/Mod/TechDraw/Gui/QGVPage.h
++++ b/src/Mod/TechDraw/Gui/QGVPage.h
+@@ -60,6 +60,7 @@ class DrawWeldSymbol;
+
+ namespace TechDrawGui
+ {
++class NavigationPreview;
+ class MDIViewPage;
+ class QGSPage;
+ class QGIView;
+@@ -99,7 +100,7 @@ public:
+     TechDraw::DrawPage* getDrawPage();
+
+     void makeGrid(int width, int height, double step);
+-    void showGrid(bool state) { m_showGrid = state; }
++    void showGrid(bool state);
+     void updateViewport() { viewport()->repaint(); }
+
+     void activateHandler(TechDrawHandler* newHandler);
+@@ -127,6 +128,7 @@ public:
+
+     TechDraw::DrawView* getBalloonParent() { return m_balloonParent; }
+
++    void beginNavigationPreview();
+     void zoomIn();
+     void zoomOut();
+
+@@ -166,6 +168,7 @@ protected:
+
+ private:
+     RendererType m_renderer;
++    std::unique_ptr<NavigationPreview> m_navigationPreview;
+
+     bool drawBkg;
+     QBrush* bkgBrush;

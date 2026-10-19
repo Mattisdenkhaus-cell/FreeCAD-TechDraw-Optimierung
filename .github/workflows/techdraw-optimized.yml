@@ -1,0 +1,278 @@
+name: FreeCAD 1.1.4 - Optimized TechDraw
+
+on:
+  pull_request:
+    paths:
+      - 'patches/**'
+      - 'scripts/**'
+      - 'tests/**'
+      - 'benchmarks/**'
+      - '.github/workflows/techdraw-optimized.yml'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Fast validation or explicitly approved Windows build'
+        type: choice
+        default: patch-only
+        options: [patch-only, qt-tests, full-build, validate-artifact]
+      artifact_run:
+        description: 'Successful optimized full-build run ID (validate-artifact only)'
+        type: string
+        default: ''
+      variant:
+        description: 'Identical packaging for original/optimized A/B tests'
+        type: choice
+        default: optimized
+        options: [upstream, optimized, optimized-unbatched]
+      confirm_long_build:
+        description: 'I approve the potentially multi-hour Windows build'
+        type: boolean
+        default: false
+      parallel_jobs:
+        description: 'Conservative MSBuild parallelism (raise only after memory checks)'
+        type: choice
+        default: '2'
+        options: ['2', '3', '4']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: techdraw-optimized-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  quick-checks:
+    if: inputs.mode != 'validate-artifact'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate long-build acknowledgement
+        if: inputs.mode == 'full-build' && !inputs.confirm_long_build
+        run: |
+          echo 'Full build requires confirm_long_build=true; no Windows job will start.' >&2
+          exit 1
+      - name: Get pinned FreeCAD sources (no submodules needed for Qt tests)
+        run: |
+          git clone --depth 1 --branch 1.1.4 --filter=blob:none --sparse https://github.com/FreeCAD/FreeCAD.git "$RUNNER_TEMP/freecad"
+          git -C "$RUNNER_TEMP/freecad" sparse-checkout set src/Mod/TechDraw
+          test "$(git -C "$RUNNER_TEMP/freecad" rev-parse HEAD)" = 4fd3bf320d9566a27e60069fc8387448aaa3a094
+      - name: Check and apply combined patch
+        run: |
+          python3 scripts/apply_optimizations.py "$RUNNER_TEMP/freecad" --check
+          python3 scripts/apply_optimizations.py "$RUNNER_TEMP/freecad"
+          python3 -m unittest discover -s tests -p 'test_*.py' -v
+      - name: Install small Qt test dependencies
+        if: github.event_name == 'pull_request' || inputs.mode != 'patch-only'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y g++ pkg-config qtbase5-dev libqt5svg5-dev qt6-base-dev qt6-svg-dev
+      - name: Compile and run Qt regression tests
+        if: github.event_name == 'pull_request' || inputs.mode != 'patch-only'
+        run: python3 scripts/run_qt_tests.py "$RUNNER_TEMP/freecad"
+      - name: Run address/undefined-behavior checks
+        if: github.event_name == 'pull_request' || inputs.mode != 'patch-only'
+        run: python3 scripts/run_qt_tests.py "$RUNNER_TEMP/freecad" --sanitize
+      - name: Compile and run Qt 6 regression tests
+        if: github.event_name == 'pull_request' || inputs.mode != 'patch-only'
+        run: python3 scripts/run_qt_tests.py "$RUNNER_TEMP/freecad" --qt-major 6
+
+  build-windows:
+    if: github.event_name == 'workflow_dispatch' && inputs.mode == 'full-build' && inputs.confirm_long_build
+    needs: quick-checks
+    runs-on: windows-2022
+    timeout-minutes: 330
+    env:
+      CL: ${{ inputs.variant == 'optimized-unbatched' && '/DTECHDRAW_BATCH_SVG_HATCH=0' || '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Get and verify official FreeCAD 1.1.4 sources
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force C:/FC | Out-Null
+          git clone -c core.autocrlf=false --depth 1 --branch 1.1.4 --recurse-submodules --shallow-submodules https://github.com/FreeCAD/FreeCAD.git C:/FC/source
+          if ($LASTEXITCODE -ne 0) { throw 'Source checkout failed.' }
+          $commit = git -C C:/FC/source rev-parse HEAD
+          if ($LASTEXITCODE -ne 0 -or $commit -ne '4fd3bf320d9566a27e60069fc8387448aaa3a094') {
+            throw 'FreeCAD source does not match verified 1.1.4 commit.'
+          }
+      - name: Apply optimized C++ patch
+        if: inputs.variant != 'upstream'
+        shell: pwsh
+        run: |
+          python scripts/apply_optimizations.py C:/FC/source
+          if ($LASTEXITCODE -ne 0) { throw 'Combined patch failed.' }
+      - name: Cache official LibPack
+        id: libpack
+        uses: actions/cache@v4
+        with:
+          path: C:/FC/libpack
+          key: freecad-libpack-1.1.0-v3.1.1.3-windows-x64-v1
+
+      - name: Download official FreeCAD 1.1 LibPack
+        if: steps.libpack.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          $url = 'https://github.com/FreeCAD/FreeCAD-LibPack/releases/download/3.1.1.3/LibPack-1.1.0-v3.1.1.3-Release.7z'
+          New-Item -ItemType Directory -Force C:/FC/libpack-unpack | Out-Null
+          curl.exe -fL --retry 3 --output C:/FC/libpack.7z $url
+          if ($LASTEXITCODE -ne 0) { throw "LibPack download failed." }
+          7z x C:/FC/libpack.7z '-oC:/FC/libpack-unpack' -y
+          if ($LASTEXITCODE -ne 0) { throw "LibPack extraction failed." }
+          $extracted = 'C:/FC/libpack-unpack/LibPack-1.1.0-v3.1.1.3-Release'
+          if (!(Test-Path $extracted)) { throw "Expected LibPack folder not found; inspect archive structure." }
+          Move-Item -Path $extracted -Destination C:/FC/libpack
+
+      - name: Configure with Visual Studio 2022
+        shell: pwsh
+        run: |
+          cmake -S C:/FC/source -B C:/FC/build --preset release -A x64 `
+            -DCMAKE_VS_NO_COMPILE_BATCHING=ON `
+            -DFREECAD_USE_PCH=OFF `
+            -DFREECAD_RELEASE_PDB=OFF `
+            -DFREECAD_LIBPACK_DIR=C:/FC/libpack `
+            -DFREECAD_COPY_DEPEND_DIRS_TO_BUILD=ON `
+            -DFREECAD_COPY_LIBPACK_BIN_TO_BUILD=ON `
+            -DFREECAD_COPY_PLUGINS_BIN_TO_BUILD=ON
+          if ($LASTEXITCODE -ne 0) { throw "CMake configure failed." }
+
+      - name: Compile FreeCAD
+        shell: pwsh
+        run: |
+          cmake --build C:/FC/build --config Release --parallel ${{ inputs.parallel_jobs }}
+          if ($LASTEXITCODE -ne 0) { throw "FreeCAD compilation failed." }
+
+      - name: Install complete FreeCAD test version
+        shell: pwsh
+        run: |
+          # Build/bin by itself is NOT a complete FreeCAD application.
+          # Use the official CMake install step to collect GUI modules,
+          # Python workbenches, resources and executable in one tree.
+          cmake --install C:/FC/build --config Release --prefix C:/FC/installed
+          if ($LASTEXITCODE -ne 0) { throw "CMake installation failed." }
+
+          $installed = 'C:/FC/installed'
+          $bin = Join-Path $installed 'bin'
+          if (!(Test-Path (Join-Path $bin 'FreeCAD.exe'))) {
+            throw "No FreeCAD.exe found in installed/bin. Inspect install layout."
+          }
+
+          # Copy runtime DLLs, Qt plugins and Python runtime prepared by LibPack.
+          # The build/bin folder contains third-party dependencies needed to run
+          # the installed FreeCAD.exe on machines without Visual Studio.
+          Copy-Item -Path 'C:/FC/build/bin/*' -Destination $bin -Recurse -Force
+
+          if (!(Test-Path (Join-Path $installed 'data'))) {
+            throw "The installation is missing the data resource folder."
+          }
+          $techDrawModules = @(Get-ChildItem -Path $installed -Recurse -File -ErrorAction Stop |
+            Where-Object { $_.Name -match '^TechDrawGui\.(pyd|dll)$' })
+          if ($techDrawModules.Count -eq 0) {
+            throw "TechDrawGui module is absent; refusing to package an unusable build."
+          }
+          Write-Host 'Compiled TechDraw GUI module(s):'
+          $techDrawModules | ForEach-Object { Write-Host $_.FullName }
+          Write-Host 'Installed root folders:'
+          Get-ChildItem $installed -Directory | ForEach-Object { Write-Host $_.Name }
+
+      - name: Package complete standalone test version
+        shell: pwsh
+        run: |
+          $installed = 'C:/FC/installed'
+          $archive = Join-Path $env:GITHUB_WORKSPACE 'FreeCAD-1.1.4-TechDraw-${{ inputs.variant }}-Windows-COMPLETE.7z'
+          Push-Location $installed
+          try {
+            7z a -t7z -mx=5 $archive '.\*'
+            if ($LASTEXITCODE -ne 0) { throw "Packaging complete installation failed." }
+          } finally {
+            Pop-Location
+          }
+
+      - name: Upload test build
+        uses: actions/upload-artifact@v4
+        with:
+          name: FreeCAD-1.1.4-TechDraw-${{ inputs.variant }}-Windows-COMPLETE
+          path: FreeCAD-1.1.4-TechDraw-${{ inputs.variant }}-Windows-COMPLETE.7z
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: Preserve configure/build diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: FreeCAD-configure-diagnostics-${{ inputs.variant }}
+          path: |
+            C:/FC/build/CMakeCache.txt
+            C:/FC/build/CMakeFiles/CMakeConfigureLog.yaml
+            C:/FC/build/CMakeFiles/CMakeError.log
+          if-no-files-found: ignore
+
+  validate-portable-windows:
+    if: github.event_name == 'workflow_dispatch' && inputs.mode == 'validate-artifact'
+    runs-on: windows-2022
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify source artifact run
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARTIFACT_RUN: ${{ inputs.artifact_run }}
+        run: |
+          if ($env:ARTIFACT_RUN -notmatch '^[0-9]+$') { throw 'A numeric artifact_run is required.' }
+          $metadata = gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$env:ARTIFACT_RUN"
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot read artifact provenance.' }
+          $run = $metadata | ConvertFrom-Json
+          if ($run.conclusion -ne 'success' -or $run.event -ne 'workflow_dispatch' -or
+              $run.path -ne '.github/workflows/techdraw-optimized.yml') {
+            throw 'Expected a successful manual optimized-workflow run from this repository.'
+          }
+          New-Item -ItemType Directory -Force C:/FC/smoke | Out-Null
+          $metadata | Set-Content C:/FC/smoke/build-provenance.json -Encoding utf8
+      - name: Download optimized portable artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: FreeCAD-1.1.4-TechDraw-optimized-Windows-COMPLETE
+          path: C:/FC/artifact
+          run-id: ${{ inputs.artifact_run }}
+          github-token: ${{ github.token }}
+      - name: Extract and launch portable FreeCAD with isolated configuration
+        shell: pwsh
+        run: |
+          $archive = 'C:/FC/artifact/FreeCAD-1.1.4-TechDraw-optimized-Windows-COMPLETE.7z'
+          if (!(Test-Path $archive)) { throw 'Expected portable archive is missing.' }
+          Get-FileHash $archive -Algorithm SHA256 | Format-List | Out-File C:/FC/smoke/archive-sha256.txt
+          7z x $archive '-oC:/FC/portable' -y
+          if ($LASTEXITCODE -ne 0) { throw 'Portable extraction failed.' }
+          $exe = 'C:/FC/portable/bin/FreeCAD.exe'
+          if (!(Test-Path $exe)) { throw 'Portable executable missing.' }
+          $env:TECHDRAW_SMOKE_OUTPUT = 'C:/FC/smoke'
+          $env:TECHDRAW_SMOKE_EXPECT_VERSION = '1.1.4'
+          $env:QT_QPA_PLATFORM = 'offscreen'
+          $macro = Join-Path $env:GITHUB_WORKSPACE 'scripts/portable_smoke.FCMacro'
+          $arguments = @('--user-cfg', 'C:/FC/smoke/user.cfg', '--system-cfg',
+                         'C:/FC/smoke/system.cfg', "`"$macro`"")
+          $process = Start-Process -FilePath $exe -ArgumentList $arguments -PassThru -WorkingDirectory 'C:/FC/portable/bin' `
+            -RedirectStandardOutput C:/FC/smoke/stdout.log -RedirectStandardError C:/FC/smoke/stderr.log
+          if (!$process.WaitForExit(180000)) {
+            Stop-Process -Id $process.Id -Force
+            throw 'Portable smoke test timed out after three minutes.'
+          }
+          if ($process.ExitCode -ne 0) { throw "Portable executable exited with $($process.ExitCode)." }
+          $resultPath = 'C:/FC/smoke/result.json'
+          if (!(Test-Path $resultPath)) { throw 'FreeCAD did not produce a smoke-test result.' }
+          $result = Get-Content $resultPath -Raw | ConvertFrom-Json
+          if ($result.status -ne 'passed') { throw ($result | ConvertTo-Json -Depth 5) }
+          $result | ConvertTo-Json -Depth 5
+      - name: Upload portable startup and export evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: FreeCAD-portable-smoke-${{ inputs.artifact_run }}
+          path: C:/FC/smoke
+          if-no-files-found: warn
+          retention-days: 7

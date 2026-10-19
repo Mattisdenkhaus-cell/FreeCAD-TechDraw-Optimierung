@@ -1,0 +1,167 @@
+# Start with the portable FreeCAD executable and separate --user-cfg/--system-cfg files.
+# Uses public document APIs and QWidget APIs only; never QGraphicsScene/items().
+import json
+import os
+from pathlib import Path
+from time import perf_counter
+import traceback
+import xml.etree.ElementTree as ET
+
+import FreeCAD as App
+import FreeCADGui as Gui
+from PySide import QtCore
+
+OUTPUT = Path(os.environ['TECHDRAW_SMOKE_OUTPUT']).resolve()
+OUTPUT.mkdir(parents=True, exist_ok=True)
+
+
+def wait_for_projected_edge(view):
+    # TechDraw projection may finish asynchronously after Document.recompute().
+    timer = QtCore.QElapsedTimer()
+    timer.start()
+    while timer.elapsed() < 30000:
+        try:
+            edge = view.getEdgeByIndex(1)
+            if not edge.isNull():
+                return
+        except ValueError:
+            pass
+        loop = QtCore.QEventLoop()
+        QtCore.QTimer.singleShot(20, loop.quit)
+        loop.exec_()
+    raise RuntimeError(f'{view.Name}: projected edge geometry was not ready within 30 seconds')
+
+
+def run_portable_smoke():
+    result = {'status': 'running', 'freecad': App.Version(), 'qt': QtCore.qVersion(),
+              'checks': [], 'phase_ms': {}}
+    document = None
+    phase_started = perf_counter()
+
+    def checkpoint(stage):
+        nonlocal phase_started
+        now = perf_counter()
+        if 'stage' in result:
+            result['phase_ms'][result['stage']] = (now - phase_started) * 1000
+        result['stage'] = stage
+        phase_started = now
+        # Keep the last stage even if FreeCAD blocks or the process times out.
+        (OUTPUT / 'result.json').write_text(json.dumps(result, indent=2), encoding='utf-8')
+
+    try:
+        checkpoint('imports')
+        import Part
+        import TechDraw
+        import TechDrawGui
+        expected = os.environ.get('TECHDRAW_SMOKE_EXPECT_VERSION', '1.1.4')
+        if '.'.join(App.Version()[:3]) != expected:
+            raise RuntimeError('Unexpected FreeCAD version; expected ' + expected)
+        result['checks'].append('FreeCAD version and Part/TechDraw/TechDrawGui imports')
+        checkpoint('create_base_view')
+        document = App.newDocument('PortableTechDrawSmoke')
+        box = document.addObject('Part::Box', 'Box')
+        box.Length, box.Width, box.Height = 50, 30, 10
+        page = document.addObject('TechDraw::DrawPage', 'Page')
+        template = document.addObject('TechDraw::DrawSVGTemplate', 'Template')
+        template_path = OUTPUT / 'template.svg'
+        template_path.write_text('<svg xmlns="http://www.w3.org/2000/svg" width="297mm" height="210mm" viewBox="0 0 297 210"></svg>', encoding='utf-8')
+        template.Template = str(template_path)
+        page.Template = template
+        view = document.addObject('TechDraw::DrawViewPart', 'View')
+        view.Source = [box]
+        view.Direction = App.Vector(0, 0, 1)
+        page.addView(view)
+        view.X, view.Y = 120, 100
+        document.recompute()
+        wait_for_projected_edge(view)
+        dimension = document.addObject('TechDraw::DrawViewDimension', 'Dimension')
+        dimension.Type = 'Distance'
+        dimension.References2D = [(view, 'Edge1')]
+        page.addView(dimension)
+        dimension.X, dimension.Y = 15, 25
+        pattern = OUTPUT / 'hatch.svg'
+        pattern.write_text('<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><path d="M0 64 L64 0 M0 32 L32 0 M32 64 L64 32" fill="none" stroke="#000000" stroke-width="1"/></svg>', encoding='utf-8')
+        hatch = document.addObject('TechDraw::DrawHatch', 'Hatch')
+        hatch.Source = (view, ['Face0'])
+        hatch.HatchPattern = str(pattern)
+        checkpoint('create_svg_section')
+        section = document.addObject('TechDraw::DrawViewSection', 'Section')
+        section.BaseView = view
+        section.SectionNormal = App.Vector(0, 1, 0)
+        section.Direction = App.Vector(0, 1, 0)
+        section.SectionOrigin = App.Vector(25, 15, 5)
+        section.FuseBeforeCut = False
+        section.CutSurfaceDisplay = 'SvgHatch'
+        section.FileHatchPattern = str(pattern)
+        page.addView(section)
+        section.X, section.Y = 200, 100
+        document.recompute()
+        wait_for_projected_edge(section)
+        for obj in (view, dimension, hatch, section):
+            if 'Up-to-date' not in obj.State:
+                raise RuntimeError(f'{obj.Name} did not recompute: {obj.State}')
+        checkpoint('show_page_with_section')
+        Gui.activeDocument().getObject(page.Name).show()
+        Gui.updateGui()
+        result['checks'].append('Projected box, dimension, SVG hatch and SVG-hatched section created and displayed')
+        checkpoint('selection_and_dimension')
+        Gui.Selection.addSelection(document.Name, view.Name, 'Edge1')
+        if not any(s.ObjectName == view.Name and 'Edge1' in s.SubElementNames
+                   for s in Gui.Selection.getSelectionEx()):
+            raise RuntimeError('Edge selection failed')
+        dimension.X = 18
+        document.recompute()
+        Gui.updateGui()
+        Gui.Selection.clearSelection()
+        result['checks'].append('Edge selection and dimension property move')
+        checkpoint('save_and_export')
+        document.saveAs(str(OUTPUT / 'fixture.FCStd'))
+        TechDrawGui.exportPageAsPdf(page, str(OUTPUT / 'page.pdf'))
+        TechDrawGui.exportPageAsSvg(page, str(OUTPUT / 'page.svg'))
+        TechDraw.writeDXFPage(page, str(OUTPUT / 'page.dxf'))
+        if not (OUTPUT / 'page.pdf').read_bytes().startswith(b'%PDF-'):
+            raise RuntimeError('PDF export missing or invalid')
+        svg_root = ET.parse(OUTPUT / 'page.svg').getroot()
+        if not svg_root.tag.endswith('svg') or len(list(svg_root.iter())) < 5:
+            raise RuntimeError('SVG export empty or invalid')
+        dxf = (OUTPUT / 'page.dxf').read_text(errors='replace')
+        if 'ENTITIES' not in dxf or 'LINE' not in dxf:
+            raise RuntimeError('DXF export has no line entities')
+        result['checks'].append('PDF/SVG/DXF export files produced (visual equivalence not asserted)')
+        # Reopen the saved document, including its embedded template/hatch resources.
+        checkpoint('close_before_reopen')
+        Gui.activeDocument().Modified = False
+        App.closeDocument(document.Name)
+        document = None
+        checkpoint('reopen')
+        document = App.openDocument(str(OUTPUT / 'fixture.FCStd'))
+        document.recompute()
+        checkpoint('reopen_projection')
+        wait_for_projected_edge(document.View)
+        wait_for_projected_edge(document.Section)
+        if document.Section.CutSurfaceDisplay != 'SvgHatch':
+            raise RuntimeError('Section SVG hatch setting was not preserved')
+        checkpoint('show_reopened_page')
+        Gui.activeDocument().getObject('Page').show()
+        Gui.updateGui()
+        result['checks'].append('Saved FCStd reopened with base and section projections and SVG hatch setting')
+        result['status'] = 'passed'
+    except Exception:
+        result['status'] = 'failed'
+        result['failed_stage'] = result.get('stage')
+        result['error'] = traceback.format_exc()
+    finally:
+        checkpoint('cleanup')
+        try:
+            if document is not None:
+                Gui.activeDocument().Modified = False
+                App.closeDocument(document.Name)
+        except Exception:
+            result['status'] = 'failed'
+            result['cleanup_error'] = traceback.format_exc()
+        checkpoint('finished')
+        (OUTPUT / 'result.json').write_text(json.dumps(result, indent=2), encoding='utf-8')
+        Gui.getMainWindow().close()
+
+
+QtCore.QTimer.singleShot(0, run_portable_smoke)

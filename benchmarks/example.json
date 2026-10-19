@@ -1,0 +1,8 @@
+{
+  "label": "optimized",
+  "fixture_kind": "assembly-without-hatches",
+  "renderer_note": "Raster; identical FreeCAD preferences and display scaling",
+  "warmup": 5,
+  "repeats": 30,
+  "output": "C:/FC/benchmark-results/optimized-assembly.json"
+}

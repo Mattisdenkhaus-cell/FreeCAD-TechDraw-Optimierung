@@ -26,9 +26,12 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('source', type=Path)
     parser.add_argument('--qt-prefix', type=Path, help='Optional extracted Debian Qt dev package prefix')
+    parser.add_argument('--qt-major', choices=('5', '6'), default='5', help='Qt major version to test (default: 5)')
     parser.add_argument('--sanitize', action='store_true')
     parser.add_argument('--navigation-only', action='store_true', help='Only native viewport/navigation tests')
     args = parser.parse_args()
+    if args.qt_prefix and args.qt_major != '5':
+        parser.error('--qt-prefix supports Qt 5 only; use pkg-config for Qt 6')
     source = args.source.resolve()
     root = Path(__file__).resolve().parents[1]
     gui = source / 'src/Mod/TechDraw/Gui'
@@ -37,8 +40,13 @@ def main():
         flags = [f'-I{includes}'] + [f'-I{includes / module}' for module in ['QtCore', 'QtGui', 'QtWidgets', 'QtSvg']]
         libs = [f'-l:lib{module}.so.5' for module in ['Qt5Svg', 'Qt5Widgets', 'Qt5Gui', 'Qt5Core']]
     else:
-        flags = shlex.split(subprocess.check_output(['pkg-config', '--cflags', 'Qt5Widgets', 'Qt5Svg'], text=True))
-        libs = shlex.split(subprocess.check_output(['pkg-config', '--libs', 'Qt5Widgets', 'Qt5Svg'], text=True))
+        modules = [f'Qt{args.qt_major}Widgets', f'Qt{args.qt_major}Svg']
+        if args.qt_major == '6':
+            modules.append('Qt6SvgWidgets')
+        version = subprocess.check_output(['pkg-config', '--modversion', modules[0]], text=True).strip()
+        print(f'Testing Qt {version}', flush=True)
+        flags = shlex.split(subprocess.check_output(['pkg-config', '--cflags', *modules], text=True))
+        libs = shlex.split(subprocess.check_output(['pkg-config', '--libs', *modules], text=True))
     with tempfile.TemporaryDirectory(prefix='techdraw-qt-') as temp:
         executable = Path(temp) / 'qt_geometry'
         # Same configuration as FreeCAD SetupQt.cmake for Qt >= 5.15.

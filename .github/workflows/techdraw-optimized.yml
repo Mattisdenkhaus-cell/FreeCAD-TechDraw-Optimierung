@@ -67,13 +67,16 @@ jobs:
         if: github.event_name == 'pull_request' || inputs.mode != 'patch-only'
         run: |
           sudo apt-get update
-          sudo apt-get install --no-install-recommends -y g++ pkg-config qtbase5-dev libqt5svg5-dev
+          sudo apt-get install --no-install-recommends -y g++ pkg-config qtbase5-dev libqt5svg5-dev qt6-base-dev qt6-svg-dev
       - name: Compile and run Qt regression tests
         if: github.event_name == 'pull_request' || inputs.mode != 'patch-only'
         run: python3 scripts/run_qt_tests.py "$RUNNER_TEMP/freecad"
       - name: Run address/undefined-behavior checks
         if: github.event_name == 'pull_request' || inputs.mode != 'patch-only'
         run: python3 scripts/run_qt_tests.py "$RUNNER_TEMP/freecad" --sanitize
+      - name: Compile and run Qt 6 regression tests
+        if: github.event_name == 'pull_request' || inputs.mode != 'patch-only'
+        run: python3 scripts/run_qt_tests.py "$RUNNER_TEMP/freecad" --qt-major 6
 
   build-windows:
     if: github.event_name == 'workflow_dispatch' && inputs.mode == 'full-build' && inputs.confirm_long_build

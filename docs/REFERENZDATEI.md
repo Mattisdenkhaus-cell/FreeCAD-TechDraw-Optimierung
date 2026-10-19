@@ -87,3 +87,19 @@ seine Zeiten werden nicht als Vergleich veröffentlicht. Die kleine erzeugte
 Makro-Testzeichnung ist weiterhin für API-/Schutztests geeignet. Für eine belastbare
 End-to-End-Aussage fehlen eine vollständige kompatible Umgebung und die optimierte
 Messung auf der festen Referenzdatei. Kein neuer mehrstündiger Build ohne Zustimmung.
+
+## Nachprüfung vor dem nächsten Build
+
+Der Benutzer hat dem nächsten Windows-Build am 19. Oktober zugestimmt und um eine
+weitere Prüfung vorab gebeten. Der kombinierte Patch verändert ausschließlich
+TechDraw-GUI-Dateien; `DrawViewSection` und seine Cut-/HLR-Worker bleiben unverändert.
+Das schließt eine Verzögerung durch GUI-Arbeit nicht aus und beweist keine Ursache
+in den unterschiedlichen Laufzeitpaketen. Die neue Navigation-Vorschau wird nur bei
+aktivierter Einstellung aufgenommen; eine deaktivierte Vorschau rendert kein Bild.
+
+Die bisherigen schnellen C++-Tests verwendeten Qt 5. Der separate optimierte Workflow
+führt dieselben Tests jetzt zusätzlich mit Qt 6 aus, einschließlich unveränderter
+SVG-Pixelvergleiche. Der Windows-Starttest erzeugt außerdem eine SVG-schraffierte
+Schnittansicht, wartet auf ihre Projektion und prüft sie nach Speichern/Wiederöffnen.
+Er schreibt Phasen und Zeiten vor potenziell blockierenden Aufrufen in `result.json`.
+Der kleine Test ist keine Reproduktion der großen privaten Referenzdatei.

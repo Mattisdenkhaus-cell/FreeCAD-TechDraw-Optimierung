@@ -25,9 +25,10 @@ Zoom/Pan. Exakte Szene, Bemaßungsgeometrie und Export bleiben erhalten. Diese E
 ist **noch nicht im unten verlinkten Windows-Paket enthalten**. Funktionsweise,
 Schalter und Grenzen: [Interaktionsanalyse](docs/INTERAKTION.md).
 
-## Schnelle lokale Prüfung (Linux, Qt 5.15)
+## Schnelle lokale Prüfung (Linux, Qt 5 und Qt 6)
 
 Git, Python 3, g++, pkg-config, qtbase5-dev und libqt5svg5-dev werden benötigt.
+Für die zusätzliche Qt-6-Prüfung außerdem qt6-base-dev und qt6-svg-dev installieren.
 Die kleine Testsuite benötigt weder OCCT noch einen vollständigen FreeCAD-Build.
 
 ```sh
@@ -37,6 +38,7 @@ python3 scripts/apply_optimizations.py /tmp/freecad-1.1.4 --check
 python3 scripts/apply_optimizations.py /tmp/freecad-1.1.4
 python3 scripts/run_qt_tests.py /tmp/freecad-1.1.4
 python3 scripts/run_qt_tests.py /tmp/freecad-1.1.4 --sanitize
+python3 scripts/run_qt_tests.py /tmp/freecad-1.1.4 --qt-major 6
 python3 -m unittest discover -s tests -p 'test_*.py' -v
 ```
 

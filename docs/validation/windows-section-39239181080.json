@@ -1,0 +1,42 @@
+{
+  "status": "passed",
+  "freecad": [
+    "1",
+    "1",
+    "4",
+    "20260928 (Git shallow)",
+    "Unknown",
+    "2026/09/28 13:46:34",
+    "HEAD",
+    "4fd3bf320d9566a27e60069fc8387448aaa3a094"
+  ],
+  "qt": "6.8.3",
+  "checks": [
+    "FreeCAD version and Part/TechDraw/TechDrawGui imports",
+    "Projected box, dimension, SVG hatch and SVG-hatched section created and displayed",
+    "Edge selection and dimension property move",
+    "PDF/SVG/DXF export files produced (visual equivalence not asserted)",
+    "Saved FCStd reopened with base and section projections and SVG hatch setting"
+  ],
+  "phase_ms": {
+    "imports": 38.05020000004333,
+    "create_base_view": 570.7720000000336,
+    "create_svg_section": 58.170099999983904,
+    "show_page_with_section": 74.07669999997779,
+    "selection_and_dimension": 25.72650000001886,
+    "save_and_export": 146.00639999991927,
+    "close_before_reopen": 6.078600000023471,
+    "reopen": 109.97870000005605,
+    "reopen_projection": 75.43699999996534,
+    "show_reopened_page": 48.556400000052236,
+    "cleanup": 5.4219999999531865
+  },
+  "stage": "finished",
+  "evidence": {
+    "source": "GitHub Actions job log",
+    "test_run": 39239181080,
+    "artifact_build_run": 39031047030,
+    "test_commit": "06ec5d2d94f2d4ce5a5493be9e1aba8b2a2edd8a",
+    "binary_commit": "3e22c3cdfa2fd8430bb62ee3494fe865f8bf15fd"
+  }
+}

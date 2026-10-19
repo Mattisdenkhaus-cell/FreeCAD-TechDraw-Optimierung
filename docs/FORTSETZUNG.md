@@ -29,9 +29,16 @@ laden (nur 299 Objekte, fehlendes FrameForge/ungültige Binder). Dieser Versuch 
 beendet und gilt nicht als Performance- oder Stabilitätsnachweis. Die private Datei
 wird nicht veröffentlicht. Details: `docs/REFERENZDATEI.md`.
 
-Der SVG-Clip-Fix ist noch nicht im Windows-Paket. Kein neuer Windows-Vollbuild ist
-für diese Änderungen freigegeben oder gestartet. Die Hauptursache der langen ersten
-Öffnung bleibt offen; keine vollständige Behebung behaupten.
+Der SVG-Clip-Fix ist noch nicht im Windows-Paket. Der Benutzer hat am 19. Oktober
+dem nächsten Windows-Build zugestimmt und eine weitere Prüfung vorab angeregt.
+Diese Nachprüfung ist abgeschlossen: Qt-5-/Qt-6-Tests in `39239044953` grün;
+der erweiterte kurze Windows-Test `39239181080` besteht mit dem vorhandenen Paket
+auch SVG-Schnittansicht, Wiederöffnung und Export. Kein neuer C++-Fehler belegt;
+der einfache Schnitt reproduziert die Verzögerung der großen Referenzdatei nicht.
+Commits: `ccfc493` (Qt 6), `06ec5d2` (Schnitttest mit Phasenprotokoll).
+Die Hauptursache der langen ersten Öffnung bleibt offen; keine vollständige
+Behebung behaupten. Nächster Schritt: freigegebenen optimierten Vollbuild mit zwei
+parallelen Prozessen starten, Lauf hier festhalten und keinen Doppelbuild auslösen.
 
 1. Quellcodeanalyse der angefragten Komponenten abgeschlossen.
 2. Gemeinsamer C++-Patch mit Kanten-Cache, Rechtecktransformationen,

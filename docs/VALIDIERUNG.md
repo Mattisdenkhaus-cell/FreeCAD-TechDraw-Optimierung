@@ -1,5 +1,32 @@
 # Validierungsstand – 17. Oktober 2026
 
+## Ergänzung vom 19. Oktober: Nachprüfung vor dem SVG-Clip-Build
+
+[Schnellprüfung 39239044953](https://github.com/Mattisdenkhaus-cell/FreeCAD-TechDraw-Optimierung/actions/runs/39239044953)
+ist für `ccfc493` bestanden: neun Python-Tests, Qt 5.15.13 einschließlich
+AddressSanitizer/UndefinedBehaviorSanitizer und erstmals dieselben C++-Tests unter
+Qt 6.4.2. Beide SVG-Schalterstellungen bestehen, darunter jeweils 72 pixelgleiche
+SVG-Szenen und der Clip-Test mit 124 statt 10.000 Kachelbesuchen. Das prüft Qt 6,
+aber nicht exakt die unter Windows verwendete Version 6.8.3.
+
+Der portable Test erzeugt nun zusätzlich eine SVG-schraffierte Schnittansicht,
+wartet auf deren Projektion und prüft die Projektion nach dem Wiederöffnen erneut.
+Ein lokaler API-Test mit dem vorhandenen FreeCAD 1.0.0 besteht alle fünf erweiterten
+Prüfgruppen. Er ist kein Windows- oder Geschwindigkeitsnachweis für die private
+Referenzdatei. Das JSON hält die zuletzt gestartete Phase und abgeschlossene
+Phasenzeiten fest, auch wenn das Programm später blockiert.
+
+[Windows-Schnitttest 39239181080](https://github.com/Mattisdenkhaus-cell/FreeCAD-TechDraw-Optimierung/actions/runs/39239181080)
+hat mit dem **bereits vorhandenen** Paket aus Build `39031047030` ebenfalls bestanden
+(FreeCAD 1.1.4, Qt 6.8.3). Erzeugung und Projektion des kleinen Schnitts dauerten
+58 ms, Wiederöffnen 110 ms und anschließendes Warten auf Basis-/Schnittprojektion
+75 ms. Das reproduziert den Zehn-Minuten-Fall nicht. Es beweist weder eine
+Beschleunigung noch die Behebung auf der privaten Datei. Es wurde nicht neu gebaut;
+das getestete Paket enthält den neuen Clip-Fix noch nicht. Ergebnis aus dem Joblog:
+[windows-section-39239181080.json](validation/windows-section-39239181080.json).
+
+Die folgenden Abschnitte dokumentieren die früheren Prüfstände.
+
 Basis FreeCAD 1.1.4: `4fd3bf320d9566a27e60069fc8387448aaa3a094`.
 Lokale Umgebung: Debian 13, Qt 5.15.15, g++, Raster-Offscreen-Qt-Tests.
 

@@ -3,6 +3,36 @@
 Branch: `development/techdraw-performance`. Hauptbranch unverändert.
 Abgeschlossene Schritte sind in getrennten Git-Commits gesichert.
 
+## Aktuell: feste Referenzdatei und Ladeproblem (19. Oktober)
+
+Der private FCStd-Upload stimmt mit der Originalmessung `8a9711f8` überein
+(SHA256 `faf4caa9467553a4b9a85692e3b611e6daaecb1537b73b52efdc40fe4709b009`).
+318 Objekte, vier projizierte Ansichten einschließlich zweier SVG-Schraffur-Schnitte.
+Original jetzt ebenfalls 1.1.4, Qt 6.8.3, OCC 7.8.1; das Original benutzt Python
+3.11.14, unser LibPack-Build Python 3.12.10. Weitere Bibliotheken unterscheiden sich.
+Originaldiagnose: 82,67 s insgesamt, rund 63,54 s Vorbereitung; Auswahlmedian 3,02 s.
+Unsere Version laut Benutzer über zehn Minuten Öffnen; Makro scheitert an fehlender
+Projektion nach 60 s. Noch keine vollständige optimierte Vergleichsmessung.
+
+- `feca5d3`: Vorbereitungs-Checkpoints/Fehlerberichte in Downloads, kein doppeltes
+  Anzeigen derselben Seite. Fehlende Fehlerdaten nicht durch einen längeren Timeout kaschieren.
+- `e6c3df1`: Auswahltest auf bereits aktivem, gespeichertem/unverändertem Blatt ohne
+  Kopie/Recompute. Volltest und ungespeicherte Eingaben bleiben in einer Kopie.
+  Neun Python-Tests und sieben lokale FreeCAD-API-/Schutzfälle bestanden.
+- `cf1b9b8`: SVG-Batching berücksichtigt zusätzlich die tatsächliche Painter-Clipgrenze.
+  Reproduzierter Qt-Fall: Fensterexposition reicht weit über eine schmale Fläche hinaus.
+  C++-Regression verlangt 62 statt 10.000 Kachelbesuche und unveränderte Bildausgabe.
+  Die weitere Qt-/Sanitizer-Prüfung erfolgt im PR-Workflow.
+
+Die große Datei lässt sich mit dem lokal installierten FreeCAD 1.0 nicht vollständig
+laden (nur 299 Objekte, fehlendes FrameForge/ungültige Binder). Dieser Versuch wurde
+beendet und gilt nicht als Performance- oder Stabilitätsnachweis. Die private Datei
+wird nicht veröffentlicht. Details: `docs/REFERENZDATEI.md`.
+
+Der SVG-Clip-Fix ist noch nicht im Windows-Paket. Kein neuer Windows-Vollbuild ist
+für diese Änderungen freigegeben oder gestartet. Die Hauptursache der langen ersten
+Öffnung bleibt offen; keine vollständige Behebung behaupten.
+
 1. Quellcodeanalyse der angefragten Komponenten abgeschlossen.
 2. Gemeinsamer C++-Patch mit Kanten-Cache, Rechtecktransformationen,
    Hover-Farbupdates und abgesichertem SVG-Batching implementiert und lokal getestet.

@@ -38,9 +38,13 @@ neu bündeln.
 ### Kurze Diagnose bei langsamer Kantenauswahl
 
 [`TechDrawSelectionDiagnose.FCMacro`](TechDrawSelectionDiagnose.FCMacro) verwendet
-denselben Ablauf mit Blattwahl und automatischer temporärer Kopie, führt aber nur
+die Blattwahl und führt nur
 **einen Aufwärmschritt und drei gemessene Auswahlvorgänge** aus. Kein kompletter
-Zoom-/Pan-/Bemaßungstest. Vorbereitung großer Dokumente kann weiterhin dauern.
+Zoom-/Pan-/Bemaßungstest. Ist das gewählte Blatt bereits aktiv und das Dokument
+unverändert gespeichert, verwendet die Diagnose dieses Blatt direkt (`existing-document`):
+kein erneutes Laden, kein Recompute, keine Modell-/Maßänderungen. Die Auswahl wird
+wiederhergestellt. Andernfalls bleibt die automatische temporäre Kopie erhalten;
+deren Vorbereitung kann bei großen Dokumenten weiterhin dauern.
 
 Die JSON-Datei enthält zusätzlich:
 
@@ -58,8 +62,17 @@ Die JSON-Datei enthält zusätzlich:
 
 Zuerst in der langsamen Installation ausführen; für Versionsvergleiche dieselbe
 gespeicherte, unveränderte FCStd-Datei in beiden Installationen verwenden. Das Makro
-ändert keine Performance-Einstellungen. Die Kopie schützt das Original wie beim
-vollständigen Test. Ergebnisse liegen wieder unter **Downloads**.
+ändert keine Performance-Einstellungen. Der vollständige Test mit Maßänderungen verwendet weiterhin immer eine Kopie.
+Ergebnisse liegen direkt unter **Downloads**. Direkte Läufe und Kopie-Läufe haben
+unterschiedliche Bedingungen und dürfen nicht als gleichartige A/B-Messung verglichen werden.
+
+Bereits vor dem Öffnen einer Kopie wird eine JSON-Datei angelegt und während der
+Vorbereitung aktualisiert. Bei Fehlern bleiben `status`, `failed_stage`, Laufzeiten,
+FreeCAD-/Qt-/OCC-Version und Projektionszustände erhalten. `stage=close_copy` kann
+bedeuten, dass FreeCAD beim Schließen noch auf laufende Berechnungen wartet. Eine
+erste projizierte Kante bestätigt nicht, dass sämtliche Flächenberechnungen beendet
+sind. Der 60-Sekunden-Grenzwert wird nicht als Lösung einer Performance-Regression
+erhöht; eine synchrone native Operation kann den Eventloop länger blockieren.
 
 Die getrennten Zeiten grenzen die Verzögerung ein; sie ersetzen kein C++-Profiling.
 Die Diagnose prüft die Auswahl-API, keine tatsächliche Mausauswahl oder Rastervorschau.
